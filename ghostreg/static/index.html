@@ -1,0 +1,1671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostReg - JetBrains 账号注册机</title>
+<style>
+  :root {
+    --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+    --text: #e4e4e7; --muted: #71717a;
+    --accent: #6366f1; --accent-hover: #818cf8;
+    --success: #22c55e; --warning: #f59e0b; --error: #ef4444;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',-apple-system,sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  .container { max-width:900px; margin:0 auto; padding:24px 16px; }
+  .header { text-align:center; padding:32px 0 24px; }
+  .header h1 { font-size:28px; font-weight:700; }
+  .header h1 span { color:var(--accent); }
+  .header p { color:var(--muted); margin-top:6px; font-size:14px; }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:20px; }
+  .panel-title { font-size:15px; font-weight:600; margin-bottom:16px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .form-row { display:flex; gap:16px; margin-bottom:16px; flex-wrap:wrap; }
+  .form-group { flex:1; min-width:150px; }
+  .form-group label { display:block; font-size:13px; color:var(--muted); margin-bottom:6px; }
+  .form-group input,.form-group select,.form-group textarea { width:100%; padding:10px 14px; background:var(--bg); border:1px solid var(--border); border-radius:8px; color:var(--text); font-size:14px; outline:none; }
+  .form-group input:focus,.form-group select:focus,.form-group textarea:focus { border-color:var(--accent); }
+  select, select option { background:var(--bg); color:var(--text); }
+  textarea { background:var(--bg); color:var(--text); border:1px solid var(--border); }
+  .form-hint { font-size:11px; color:var(--warning); margin-top:4px; }
+  .btn-row { display:flex; gap:12px; margin-top:20px; }
+  .btn { padding:10px 28px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  .btn-primary { background:var(--accent); color:#fff; }
+  .btn-primary:hover { background:var(--accent-hover); }
+  .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+  .btn-secondary { background:transparent; color:var(--muted); border:1px solid var(--border); }
+  .btn-secondary:hover { border-color:var(--muted); color:var(--text); }
+  .btn-small { padding:6px 12px; font-size:12px; border-radius:6px; }
+  .name-row { display:flex; gap:8px; align-items:flex-end; }
+  .name-row .form-group { flex:1; }
+  .status-bar { display:flex; align-items:center; gap:8px; padding:10px 16px; background:var(--bg); border-radius:8px; font-size:13px; margin-bottom:20px; border:1px solid var(--border); }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--muted); }
+  .status-dot.running { background:var(--success); animation:pulse 1.5s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .task-list { display:flex; flex-direction:column; gap:8px; }
+  .task-card { display:grid; grid-template-columns:48px 1fr 160px 120px; align-items:center; gap:12px; padding:14px 16px; background:var(--bg); border:1px solid var(--border); border-radius:10px; }
+  .task-card.waiting { border-left:3px solid var(--warning); }
+  .task-card.working { border-left:3px solid var(--accent); }
+  .task-card.done { border-left:3px solid var(--success); }
+  .task-card.failed { border-left:3px solid var(--error); }
+  .task-id { font-size:20px; font-weight:700; color:var(--muted); text-align:center; }
+  .task-info { min-width:0; }
+  .task-email { font-size:14px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .task-step { font-size:12px; color:var(--muted); margin-top:2px; }
+  .task-password { font-family:Consolas,monospace; font-size:13px; color:var(--muted); }
+  .task-badge { text-align:right; font-size:12px; font-weight:600; }
+  .badge-waiting { color:var(--warning); }
+  .badge-working { color:var(--accent); }
+  .badge-done { color:var(--success); }
+  .badge-failed { color:var(--error); }
+  .summary { display:flex; gap:16px; margin-top:20px; flex-wrap:wrap; }
+  .summary-item { flex:1; min-width:120px; text-align:center; padding:16px; background:var(--bg); border-radius:10px; border:1px solid var(--border); }
+  .summary-num { font-size:32px; font-weight:700; }
+  .summary-label { font-size:12px; color:var(--muted); margin-top:4px; }
+  .empty { text-align:center; padding:48px 0; color:var(--muted); }
+  .empty-icon { font-size:48px; margin-bottom:12px; }
+  /* Tab 导航 */
+  .tab-bar { display:flex; gap:0; margin-bottom:24px; border-bottom:2px solid var(--border); }
+  .tab-btn { padding:12px 24px; font-size:15px; font-weight:600; color:var(--muted); background:none; border:none; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all .2s; }
+  .tab-btn:hover { color:var(--text); }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-btn .tab-badge { font-size:10px; padding:2px 7px; border-radius:10px; margin-left:6px; font-weight:700; }
+  .tab-page { display:none; }
+  .tab-page.active { display:block; }
+  .proto-speed { display:inline-block; background:linear-gradient(135deg,#6366f1,#a855f7); color:#fff; padding:2px 10px; border-radius:12px; font-size:11px; font-weight:700; margin-left:8px; }
+  .history-table { width:100%; border-collapse:collapse; margin-top:12px; }
+  .history-table th { text-align:left; font-size:12px; color:var(--muted); padding:8px 12px; border-bottom:1px solid var(--border); text-transform:uppercase; letter-spacing:.5px; }
+  .history-table td { padding:10px 12px; font-size:14px; border-bottom:1px solid var(--border); }
+  .history-table tr:hover td { background:rgba(99,102,241,.05); }
+  .history-table .mono { font-family:Consolas,monospace; font-size:13px; }
+  .copy-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:2px 8px; border-radius:4px; cursor:pointer; font-size:11px; }
+  .copy-btn:hover { color:var(--text); border-color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1><span>Ghost</span>Reg</h1>
+    <p>JetBrains 账号注册机 — 全自动打码 / 手动验证码可选</p>
+  </div>
+
+  <!-- Tab 导航 -->
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchTab('browser')">浏览器注册</button>
+    <button class="tab-btn" onclick="switchTab('protocol')">协议注册机 <span class="proto-speed">10x 快</span></button>
+  </div>
+
+  <!-- ═══ Tab 1: 浏览器注册（原有内容） ═══ -->
+  <div class="tab-page active" id="tab-browser">
+
+  <div class="panel" style="border-color:var(--error);background:rgba(239,68,68,.08)">
+    <div id="apiKeyTitle" style="font-size:15px;font-weight:700;color:var(--error);margin-bottom:10px">
+      !! 重要：首次使用前必须配置邮箱 API Key !!
+    </div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8;margin-bottom:14px">
+      GhostReg 使用 <a href="https://vip.215.im" target="_blank" style="color:var(--accent)">YYDS Mail (vip.215.im)</a> 临时邮箱服务接收验证码。<br>
+      <strong style="color:var(--error)">请先完成以下步骤：</strong><br>
+      1. 访问 <a href="https://vip.215.im/login" target="_blank" style="color:var(--accent);text-decoration:underline">vip.215.im/login</a> 注册/登录账号（支持 GitHub 登录）<br>
+      2. 访问 <a href="https://vip.215.im/api-keys" target="_blank" style="color:var(--accent);text-decoration:underline">vip.215.im/api-keys</a> 创建 API Key（选择「读写」权限 + 「所有可访问域名」）<br>
+      3. 将获得的 <code style="color:var(--warning);background:rgba(245,158,11,.15);padding:1px 6px;border-radius:4px">AC-xxxxxx</code> 密钥粘贴到下方输入框并保存
+    </div>
+    <div style="display:flex;gap:12px;align-items:flex-end">
+      <div class="form-group" style="flex:1">
+        <label>YYDS Mail API Key</label>
+        <input type="text" id="apiKey" placeholder="AC-xxxxxxxxxxxxxxxxxxxxxxxx" style="font-family:Consolas,monospace">
+      </div>
+      <button class="btn btn-primary" onclick="saveApiKey()" id="btnSaveKey" style="height:42px">保存</button>
+    </div>
+    <div id="apiKeyStatus" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
+  <div class="panel" id="captchaPanel" style="border-color:var(--border)">
+    <div id="captchaTitle" style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:10px">
+      打码平台配置（全自动过验证码）
+    </div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8;margin-bottom:14px">
+      配置后勾选「全自动化过验证码」即可自动通过 reCAPTCHA，无需手动操作。<br>
+      <strong style="color:var(--accent)">请先完成以下步骤：</strong><br>
+      1. 访问 <a href="https://yescaptcha.com" target="_blank" style="color:var(--accent);text-decoration:underline">yescaptcha.com</a> 注册账号<br>
+      2. 充值积分（支持 <strong style="color:var(--success)">微信</strong> / <strong style="color:var(--accent)">支付宝</strong>）<br>
+      3. 在「个人中心」复制 ClientKey 粘贴到下方
+    </div>
+    <div style="font-size:12px;color:var(--warning);line-height:1.8;margin-bottom:14px;padding:10px 14px;background:rgba(245,158,11,.1);border-radius:8px;border:1px solid rgba(245,158,11,.2)">
+      <strong>费用参考：</strong>1 元 = 1000 积分，每次验证消耗 15 积分<br>
+      1 元 ≈ 注册 66 个账号 | 3 元 ≈ 200 个账号 | <strong>建议充 2~3 元就够用了</strong>
+    </div>
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group" style="flex:1;min-width:280px">
+        <label>YesCaptcha ClientKey</label>
+        <input type="text" id="captchaKey" placeholder="在 yescaptcha.com 个人中心复制" style="font-family:Consolas,monospace">
+        <input type="hidden" id="captchaPlatform" value="yescaptcha">
+      </div>
+      <button class="btn btn-primary" onclick="saveCaptchaConfig()" id="btnSaveCaptcha" style="height:42px">保存</button>
+    </div>
+    <div id="captchaStatus" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">控制面板</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>统一密码</label>
+        <input type="text" id="password" value="QPalzmw123">
+        <div class="form-hint">* 仅限英文字母和数字，不要加特殊符号（@#$等），否则注册会失败</div>
+      </div>
+      <div class="form-group">
+        <label>浏览器</label>
+        <select id="browser">
+          <option value="chrome">Google Chrome</option>
+          <option value="edge">Microsoft Edge</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0.5">
+        <label>同时开几个窗口</label>
+        <input type="number" id="count" value="3" min="1" max="10" style="width:70px">
+      </div>
+      <div class="form-group">
+        <label>First Name</label>
+        <div class="name-row">
+          <div class="form-group" style="margin:0"><input type="text" id="firstName" value="Ghost"></div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Last Name</label>
+        <div class="name-row">
+          <div class="form-group" style="margin:0"><input type="text" id="lastName" value="Reg"></div>
+        </div>
+      </div>
+      <div class="form-group" style="flex:0;min-width:auto;align-self:flex-end">
+        <button class="btn btn-secondary btn-small" onclick="randomName()" title="生成随机英文名">随机名字</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">多窗口注册时名字会自动加序号：Ghost, Ghost2, Ghost3...</div>
+    <div class="form-row" style="align-items:center">
+      <div class="form-group" style="flex:0;min-width:auto">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="aiCaptcha" checked>
+          <span style="color:var(--accent);font-weight:600">全自动化过验证码（打码平台）</span>
+        </label>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;padding-left:24px">需先配置 YesCaptcha Key，勾选后全程自动注册</div>
+      </div>
+      <div class="form-group" style="flex:0;min-width:auto">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" id="autoTokens" onchange="toggleCountrySelect()">
+          注册后自动跳转绑卡页
+        </label>
+      </div>
+      <div class="form-group" id="countryGroup" style="display:none">
+        <label>选择国家</label>
+        <select id="country">
+          <option value="JP">Japan</option>
+        </select>
+      </div>
+      <div id="autoTokensHint" style="font-size:11px;color:var(--muted);line-height:1.4;display:none">
+        勾选后注册成功会自动跳转到 Tokens 页面，选择国家并弹出 Add credit card
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnStart" onclick="startReg()">开始注册</button>
+      <button class="btn btn-secondary" id="btnForceStart" onclick="forceStart()">强制新建</button>
+      <button class="btn btn-secondary" id="btnStop" onclick="stopReg()" style="display:none">停止</button>
+      <button class="btn btn-secondary" id="btnKillAll" onclick="killAllBrowsers()" style="margin-left:auto;border-color:var(--error);color:var(--error)">一键关闭所有浏览器</button>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <div class="status-dot" id="wsDot"></div>
+    <span id="wsStatus">连接中...</span>
+  </div>
+
+  <div id="taskArea">
+    <div class="empty">
+      <div class="empty-icon">&#9881;</div>
+      <div>设置参数后点击「开始注册」<br>每个账号会弹出浏览器窗口，手动过验证码即可<br>注册成功后浏览器保留不关闭</div>
+    </div>
+  </div>
+
+  <div class="summary" id="summary" style="display:none">
+    <div class="summary-item"><div class="summary-num" id="numTotal" style="color:var(--text)">0</div><div class="summary-label">总计</div></div>
+    <div class="summary-item"><div class="summary-num" id="numSuccess" style="color:var(--success)">0</div><div class="summary-label">成功</div></div>
+    <div class="summary-item"><div class="summary-num" id="numFailed" style="color:var(--error)">0</div><div class="summary-label">失败</div></div>
+    <div class="summary-item"><div class="summary-num" id="numPending" style="color:var(--warning)">0</div><div class="summary-label">进行中</div></div>
+  </div>
+
+  <!-- 批量自动登录面板 -->
+  <div class="panel" style="margin-top:24px;border-color:#6366f1;background:rgba(99,102,241,.04)">
+    <div class="panel-title" style="color:#6366f1">批量自动登录</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+      粘贴已注册的账号列表，自动打开浏览器并登录。登录后可选自动跳转绑卡页。<br>
+      <strong>智能识别</strong>：自动从文本中提取邮箱和密码。支持 <code>邮箱----密码</code>、<code>邮箱:密码</code>、<code>邮箱 密码</code>，也可以直接粘贴表格、CSV、日志等格式。<br>
+      <span style="color:var(--warning)">最多同时登录 20 个账号</span>（每个都会弹出浏览器窗口，并发数可调）
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>账号列表（每行一个）</label>
+        <textarea id="loginAccounts" rows="5" placeholder='直接粘贴，什么格式都能识别：&#10;email@xxx.com----QPalzmw123&#10;email@xxx.com / QPalzmw123&#10;email@xxx.com:QPalzmw123&#10;或直接粘贴 JSON / CSV / 表格内容' style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:8px;font-family:monospace;font-size:12px;resize:vertical"></textarea>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0.4">
+        <label>浏览器</label>
+        <select id="loginBrowser" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px">
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+        </select>
+      </div>
+      <div class="form-group" style="flex:0.4">
+        <label>并发数 <span style="color:var(--muted);font-weight:normal">(1-15)</span></label>
+        <input type="number" id="loginWorkers" value="5" min="1" max="15" style="width:60px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px">
+      </div>
+      <div class="form-group" style="flex:0.3">
+        <label>
+          <input type="checkbox" id="loginAutoTokens" style="margin-right:4px">
+          登录后自动跳转绑卡页
+        </label>
+      </div>
+      <div class="form-group" id="loginCountryGroup" style="flex:0.4;display:none">
+        <label>国家</label>
+        <select id="loginCountry" style="background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px"></select>
+      </div>
+    </div>
+    <div class="btn-row" style="gap:8px">
+      <button class="btn btn-primary" onclick="protoLogin()" id="btnProtoLogin" style="background:linear-gradient(135deg,#10b981,#059669)">
+        协议登录（推荐，秒开）
+      </button>
+      <button class="btn btn-primary" onclick="autoLogin()" id="btnAutoLogin" style="background:linear-gradient(135deg,#6366f1,#a855f7)">
+        浏览器登录（慢）
+      </button>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:4px">
+      <strong>协议登录</strong>：纯 HTTP 登录 + Cookie 注入浏览器，秒级完成。<strong>浏览器登录</strong>：自动化填表单点按钮，较慢但兼容性好。
+    </div>
+    <div id="loginStatus" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+    <div id="loginResults" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
+  <div class="panel" id="cardPanel" style="margin-top:24px;">
+    <div class="panel-title">一键填卡（Add Credit Card）</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      在浏览器窗口中打开 Add credit card 页面，填好卡信息后点击按钮操作所有窗口。
+    </div>
+    <div style="font-size:11px;color:var(--error);margin-bottom:12px;line-height:1.6">
+      ⚠ 自己手动打开的 Chrome/Edge 无法被识别。请使用下方「打开浏览器」按钮，或使用注册时自动打开的窗口。
+    </div>
+    <div class="form-row" style="margin-bottom:16px;align-items:flex-end">
+      <div class="form-group" style="flex:0.5">
+        <label>打开数量</label>
+        <input type="number" id="openBrowserCount" value="1" min="1" max="20" style="width:60px">
+      </div>
+      <div class="form-group" style="flex:0.6">
+        <label>浏览器</label>
+        <select id="openBrowserType">
+          <option value="chrome">Chrome</option>
+          <option value="edge">Edge</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="btnOpenBrowser" onclick="openBrowsers()">打开浏览器</button>
+      <div style="font-size:11px;color:var(--muted);margin-left:8px;line-height:1.4">
+        自动打开 JetBrains 登录页<br>登录后手动导航到绑卡页面
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>卡号 Card Number</label>
+        <input type="text" id="cardNumber" placeholder="4111111111111111" maxlength="19" autocomplete="cc-number">
+      </div>
+      <div class="form-group" style="flex:0.8">
+        <label>有效期 Expiry</label>
+        <input type="text" id="cardExpiry" placeholder="MM/YY" maxlength="5" autocomplete="cc-exp">
+      </div>
+      <div class="form-group" style="flex:0.6">
+        <label>CVV</label>
+        <input type="text" id="cardCvv" placeholder="123" maxlength="4" autocomplete="cc-csc">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>持卡人姓名 Name on Card</label>
+        <input type="text" id="cardName" placeholder="ZHANG SAN" autocomplete="cc-name">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>目标窗口</label>
+        <select id="cardTarget">
+          <option value="0">所有窗口</option>
+        </select>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnFillCard" onclick="fillCard()">一键填写</button>
+      <button class="btn btn-secondary" id="btnClearCard" onclick="clearCard()" style="border-color:var(--error);color:var(--error)">一键清空</button>
+      <button class="btn btn-primary" id="btnConfirmCard" onclick="confirmCard()" style="background:var(--success)">一键确认</button>
+      <button class="btn btn-secondary btn-small" onclick="refreshBrowsers()" style="margin-left:auto">刷新窗口列表</button>
+    </div>
+    <div id="cardResult" style="margin-top:12px;font-size:13px;display:none"></div>
+  </div>
+
+  <div class="panel" id="historyPanel" style="margin-top:24px;">
+    <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>已注册账号（永久保存）</span>
+      <div style="display:flex;gap:8px" id="historyActions">
+        <button class="btn btn-secondary btn-small" onclick="toggleSelectAll()" id="btnSelectAll" style="display:none">全选</button>
+        <button class="btn btn-secondary btn-small" onclick="deleteSelected()" id="btnDeleteSelected" style="display:none;border-color:var(--error);color:var(--error)">删除选中</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px;padding:8px 14px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid var(--border)">
+      账号保存在 <code style="color:var(--accent);background:rgba(99,102,241,.12);padding:1px 6px;border-radius:4px">output/accounts.json</code> 和
+      <code style="color:var(--accent);background:rgba(99,102,241,.12);padding:1px 6px;border-radius:4px">output/accounts.csv</code>
+      中，重启程序后记录不丢失。可直接打开 output 文件夹复制。
+    </div>
+    <div id="historyArea"><span style="color:var(--muted);font-size:14px">暂无记录</span></div>
+  </div>
+
+  </div><!-- /tab-browser -->
+
+  <!-- ═══ Tab 2: 协议注册机 ═══ -->
+  <div class="tab-page" id="tab-protocol">
+    <div class="panel" style="border-color:var(--accent);background:rgba(99,102,241,.06)">
+      <div style="font-size:16px;font-weight:700;color:var(--accent);margin-bottom:8px">
+        协议注册机 — 纯 HTTP 极速注册
+      </div>
+      <div style="font-size:13px;color:var(--text);line-height:1.8;margin-bottom:6px">
+        不打开浏览器，直接通过 HTTP 协议与 JetBrains API 通信完成注册。<br>
+        <strong style="color:var(--success)">速度：</strong>单账号 30-60 秒（浏览器版 3 分钟）&nbsp;
+        <strong style="color:var(--success)">内存：</strong>5MB/任务（浏览器版 300MB/窗口）&nbsp;
+        <strong style="color:var(--success)">并发：</strong>最高 20 路
+      </div>
+      <div style="font-size:11px;color:var(--warning);margin-top:6px">
+        需要已配置 YYDS Mail API Key + YesCaptcha 打码平台（与浏览器版共享配置）
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">协议注册控制</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:0.5">
+          <label>注册数量（1-50）</label>
+          <input type="number" id="protoCount" value="3" min="1" max="50">
+        </div>
+        <div class="form-group" style="flex:0.5">
+          <label>并发数（1-20）</label>
+          <input type="number" id="protoWorkers" value="3" min="1" max="20">
+          <div class="form-hint">* 不开代理池：建议 3（超过会触发 429）<br>* 开代理池：每 5 并发需 1 个 Workers，最高已测 20 并发</div>
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input type="text" id="protoPassword" value="QPalzmw123">
+          <div class="form-hint">* 仅限英文字母和数字</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>First Name（留空随机）</label>
+          <input type="text" id="protoFirstName" placeholder="留空自动随机">
+        </div>
+        <div class="form-group">
+          <label>Last Name（留空随机）</label>
+          <input type="text" id="protoLastName" placeholder="留空自动随机">
+        </div>
+      </div>
+      <!-- CF 代理池开关 -->
+      <div class="form-row" style="margin-top:12px;align-items:center">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px">
+          <input type="checkbox" id="protoUseProxy" onchange="cfToggleProxy(this.checked)">
+          <span>启用 Cloudflare 动态 IP 代理池</span>
+          <span id="cfProxyBadge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--muted)">未部署</span>
+        </label>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnProtoStart" onclick="protoStart()" style="background:linear-gradient(135deg,#6366f1,#a855f7)">
+          开始协议注册
+        </button>
+        <button class="btn btn-secondary" id="btnProtoStop" onclick="protoStop()" style="display:none">停止</button>
+      </div>
+    </div>
+
+    <!-- CF 代理池配置面板 -->
+    <div class="panel" id="cfPanel" style="display:none;border-color:#f59e0b;background:rgba(245,158,11,.06)">
+      <div class="panel-title" style="color:#f59e0b">Cloudflare 动态 IP 代理池</div>
+
+      <!-- 风险警告 -->
+      <div style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;line-height:1.7">
+        <strong style="color:#ef4444">&#9888; 重要风险提示</strong><br>
+        <span style="color:var(--text)">
+          本功能会在你的 Cloudflare 账号下自动部署 Workers 脚本用于代理请求。<br>
+          <strong>此操作可能导致你的 Cloudflare 账号被封禁（违反 CF TOS）。</strong><br>
+          <strong style="color:#ef4444">强烈建议：用一个全新的、不重要的邮箱注册一个新的 Cloudflare 账号，专门用于此功能。</strong><br>
+          不要使用你的主力 CF 账号！注册 CF 完全免费，随便注册一个即可。
+        </span>
+      </div>
+
+      <div style="font-size:12px;color:var(--text);line-height:1.7;margin-bottom:12px">
+        通过 Cloudflare Workers 免费获取动态出口 IP，每 5 个并发共用 1 个 IP，突破单 IP 429 限频。<br>
+        <strong>免费</strong>：只需注册 Cloudflare 免费账号，无需付费。<strong>注意</strong>：workers.dev 域名在大陆需要梯子访问。
+      </div>
+
+      <!-- 获取教程 -->
+      <details style="margin-bottom:14px;font-size:12px;line-height:1.8;color:var(--text)">
+        <summary style="cursor:pointer;font-weight:bold;color:#f59e0b;margin-bottom:6px">&#128218; 如何获取 API Token 和 Account ID？（点击展开教程）</summary>
+        <div style="background:rgba(0,0,0,.15);border-radius:6px;padding:12px;margin-top:6px">
+          <strong>第一步：注册 Cloudflare 账号</strong><br>
+          &bull; 打开 <a href="https://dash.cloudflare.com/sign-up" target="_blank" style="color:var(--accent)">https://dash.cloudflare.com/sign-up</a><br>
+          &bull; 用一个<strong style="color:#ef4444">不重要的新邮箱</strong>注册（不要用主力邮箱！）<br>
+          &bull; 注册完成后登录 Cloudflare Dashboard<br><br>
+
+          <strong>第二步：获取 Account ID</strong><br>
+          &bull; 登录后点击左侧菜单 <code>Workers & Pages</code>（Workers 和 Pages）<br>
+          &bull; 在右侧边栏找到 <strong>Account ID</strong>，复制那串 32 位字符<br>
+          &bull; 或直接打开：<a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" style="color:var(--accent)">Workers & Pages 页面</a><br><br>
+
+          <strong>第三步：创建 API Token</strong><br>
+          &bull; 点击右上角头像 &rarr; <code>My Profile</code>（我的资料）<br>
+          &bull; 左侧选 <code>API Tokens</code>（API 令牌）<br>
+          &bull; 点击 <code>Create Token</code>（创建令牌）<br>
+          &bull; 找到 <code>Edit Cloudflare Workers</code>（编辑 Cloudflare Workers）模板，点 <code>Use template</code>（使用模板）<br>
+          &bull; 直接点 <code>Continue to summary</code>（继续到摘要）&rarr; <code>Create Token</code>（创建令牌）<br>
+          &bull; 复制生成的 Token（以 <code>cfut_</code> 开头）<br>
+          &bull; 或直接打开：<a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" style="color:var(--accent)">API Tokens 页面</a><br><br>
+
+          <strong>第四步：填写梯子代理地址</strong><br>
+          &bull; 如果你用的是 <strong>Clash / V2Ray / FlClash</strong>，默认 HTTP 代理端口一般是 <code>http://127.0.0.1:7890</code><br>
+          &bull; 如果你不确定端口，打开你的梯子软件查看 HTTP 代理端口设置<br>
+          &bull; 这个地址是必填的，因为 workers.dev 域名在国内被墙了<br><br>
+
+          <strong>第五步：点击「保存并部署 Workers」</strong><br>
+          &bull; 程序会自动通过 Cloudflare API 把代理脚本部署到你的账号下<br>
+          &bull; 部署成功后会显示绿色的 "Workers 部署成功!" 和 Workers URL<br>
+          &bull; 之后勾选上方的"启用 Cloudflare 动态 IP 代理池"，开始注册时就会自动通过代理注册
+        </div>
+      </details>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>
+            API Token
+            <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" style="font-size:11px;color:var(--accent);margin-left:6px">去获取 &rarr;</a>
+          </label>
+          <input type="text" id="cfApiToken" placeholder="cfut_xxxxxxxxxxxx">
+          <div class="form-hint">头像 &rarr; My Profile &rarr; API Tokens &rarr; Create Token &rarr; Edit Cloudflare Workers<br>（头像 &rarr; 我的资料 &rarr; API 令牌 &rarr; 创建令牌 &rarr; 编辑 Cloudflare Workers 模板）</div>
+        </div>
+        <div class="form-group">
+          <label>
+            Account ID
+            <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" style="font-size:11px;color:var(--accent);margin-left:6px">去获取 &rarr;</a>
+          </label>
+          <input type="text" id="cfAccountId" placeholder="0d79xxxxxxxxxxxx">
+          <div class="form-hint">Workers & Pages 页面右侧边栏的 Account ID<br>（左侧菜单 Workers 和 Pages &rarr; 右侧找 Account ID 复制）</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:0.5">
+          <label>Workers 数量（1-10）</label>
+          <input type="number" id="cfWorkersCount" value="1" min="1" max="10">
+          <div class="form-hint">每个 Workers = 1 个独立 IP 池，可承载 5 个并发<br>例：注册 15 号需要 3 个 Workers（15 &divide; 5 = 3）</div>
+        </div>
+        <div class="form-group">
+          <label>梯子代理地址（必填）</label>
+          <input type="text" id="cfLadderProxy" placeholder="http://127.0.0.1:7890" value="">
+          <div class="form-hint">你的 Clash/V2Ray/FlClash 的 HTTP 代理端口<br>workers.dev 域名在国内被墙，必须通过梯子访问</div>
+        </div>
+      </div>
+      <div class="btn-row" style="gap:8px">
+        <button class="btn btn-primary" onclick="cfSaveAndDeploy()" style="background:linear-gradient(135deg,#f59e0b,#ef4444)" id="btnCfDeploy">
+          保存并部署 Workers
+        </button>
+        <button class="btn btn-secondary" onclick="cfHealthCheck()">检查状态</button>
+        <button class="btn btn-secondary" onclick="cfCleanup()" style="border-color:var(--error);color:var(--error)">删除 Workers</button>
+      </div>
+      <div id="cfStatus" style="margin-top:8px;font-size:12px;color:var(--muted)"></div>
+    </div>
+
+    <div class="status-bar">
+      <div class="status-dot" id="protoDot"></div>
+      <span id="protoStatusText">就绪</span>
+    </div>
+
+    <div id="protoTaskArea">
+      <div class="empty">
+        <div class="empty-icon">&#9889;</div>
+        <div>设置参数后点击「开始协议注册」<br>纯 HTTP 请求，不弹出浏览器窗口<br>速度比浏览器版快 5-10 倍</div>
+      </div>
+    </div>
+
+    <div class="summary" id="protoSummary" style="display:none">
+      <div class="summary-item"><div class="summary-num" id="protoNumTotal" style="color:var(--text)">0</div><div class="summary-label">总计</div></div>
+      <div class="summary-item"><div class="summary-num" id="protoNumSuccess" style="color:var(--success)">0</div><div class="summary-label">成功</div></div>
+      <div class="summary-item"><div class="summary-num" id="protoNumFailed" style="color:var(--error)">0</div><div class="summary-label">失败</div></div>
+      <div class="summary-item"><div class="summary-num" id="protoNumPending" style="color:var(--warning)">0</div><div class="summary-label">进行中</div></div>
+    </div>
+
+    <div class="panel" id="protoHistoryPanel" style="margin-top:24px;">
+      <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>协议注册历史（永久保存）</span>
+        <div style="display:flex;gap:8px" id="protoHistoryActions">
+          <button class="btn btn-secondary btn-small" onclick="protoToggleSelectAll()" id="btnProtoSelectAll" style="display:none">全选</button>
+          <button class="btn btn-secondary btn-small" onclick="protoDeleteSelected()" id="btnProtoDeleteSelected" style="display:none;border-color:var(--error);color:var(--error)">删除选中</button>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px;padding:8px 14px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid var(--border)">
+        协议注册账号单独保存在 <code style="color:var(--accent);background:rgba(99,102,241,.12);padding:1px 6px;border-radius:4px">output/protocol_accounts.json</code> 和
+        <code style="color:var(--accent);background:rgba(99,102,241,.12);padding:1px 6px;border-radius:4px">output/protocol_accounts.csv</code>
+        中，与浏览器注册的账号分开存储，互不影响。
+      </div>
+      <div id="protoHistoryArea"><span style="color:var(--muted);font-size:14px">暂无记录</span></div>
+    </div>
+  </div><!-- /tab-protocol -->
+
+</div>
+
+<script>
+let ws = null, tasks = {}, history = [];
+
+const FIRST_NAMES = [
+  'James','John','Robert','Michael','David','William','Richard','Joseph','Thomas','Chris',
+  'Daniel','Paul','Mark','George','Steven','Kevin','Brian','Edward','Alex','Ryan',
+  'Lucas','Noah','Ethan','Mason','Logan','Leo','Jack','Henry','Owen','Samuel',
+  'Oliver','Liam','Benjamin','Theodore','Sebastian','Caleb','Nathan','Adrian','Dylan','Hunter',
+  'Carter','Jayden','Luke','Gabriel','Isaac','Lincoln','Julian','Mateo','Wyatt','Levi',
+  'Andrew','Eli','Landon','Connor','Aaron','Easton','Cooper','Nolan','Cameron','Kai',
+  'Evan','Austin','Colton','Asher','Declan','Parker','Blake','Finn','Gavin','Silas',
+  'Elena','Clara','Mila','Aria','Chloe','Stella','Ruby','Hazel','Ivy','Lily',
+  'Nora','Grace','Maya','Zoe','Alice','Ellie','Sophie','Luna','Violet','Willow'
+];
+const LAST_NAMES = [
+  'Smith','Johnson','Williams','Brown','Jones','Garcia','Miller','Davis','Wilson','Moore',
+  'Taylor','Anderson','Thomas','Jackson','White','Harris','Martin','Clark','Lewis','Walker',
+  'Hall','Allen','Young','King','Wright','Lopez','Hill','Scott','Green','Adams',
+  'Nelson','Baker','Rivera','Campbell','Mitchell','Carter','Roberts','Turner','Parker','Evans',
+  'Collins','Edwards','Stewart','Morris','Rogers','Reed','Cook','Morgan','Bell','Murphy',
+  'Bailey','Cooper','Richardson','Cox','Howard','Ward','Brooks','Kelly','Sanders','Price',
+  'Bennett','Wood','Barnes','Ross','Henderson','Coleman','Jenkins','Perry','Powell','Russell',
+  'Foster','Hayes','Sullivan','Bryant','Watson','Griffin','Palmer','Hunt','Stone','Webb'
+];
+
+function randomName() {
+  const f = FIRST_NAMES[Math.floor(Math.random()*FIRST_NAMES.length)];
+  const l = LAST_NAMES[Math.floor(Math.random()*LAST_NAMES.length)];
+  document.getElementById('firstName').value = f;
+  document.getElementById('lastName').value = l;
+}
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => {
+    document.getElementById('wsDot').className = 'status-dot running';
+    document.getElementById('wsStatus').textContent = '已连接';
+  };
+  ws.onclose = () => {
+    document.getElementById('wsDot').className = 'status-dot';
+    document.getElementById('wsStatus').textContent = '已断开，3秒后重连...';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
+}
+
+function handleMessage(msg) {
+  if (msg.type === 'snapshot') {
+    tasks = msg.tasks || {};
+    history = msg.history || [];
+    renderTasks(); updateSummary(); renderHistory();
+    if (msg.running) { document.getElementById('btnStart').style.display='none'; document.getElementById('btnStop').style.display=''; }
+  }
+  else if (msg.type === 'started') {
+    tasks = msg.tasks || {};
+    document.getElementById('btnStart').style.display='none';
+    document.getElementById('btnStop').style.display='';
+    document.getElementById('btnStart').disabled = false;
+    renderTasks(); updateSummary();
+  }
+  else if (msg.type === 'task_update') {
+    tasks[msg.task.task_id] = msg.task;
+    renderTasks(); updateSummary();
+  }
+  else if (msg.type === 'completed' || msg.type === 'stopped') {
+    document.getElementById('btnStart').style.display='';
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnStop').style.display='none';
+    if (msg.history) { history = msg.history; renderHistory(); }
+    updateSummary();
+  }
+  else if (msg.type === 'history_update') {
+    history = msg.history || [];
+    renderHistory();
+  }
+}
+
+function renderTasks() {
+  const area = document.getElementById('taskArea');
+  const ids = Object.keys(tasks).map(Number).sort((a,b)=>a-b);
+  if (!ids.length) return;
+  document.getElementById('summary').style.display = 'flex';
+  let html = '<div class="task-list">';
+  for (const id of ids) {
+    const t = tasks[id];
+    let cls='working', badge='<span class="badge-working">进行中</span>';
+    if (t.success===true) { cls='done'; badge='<span class="badge-done">&#10003; 成功</span>'; }
+    else if (t.success===false) { cls='failed'; badge='<span class="badge-failed">&#10007; 失败</span>'; }
+    else if (t.step===5) {
+      if (document.getElementById('aiCaptcha').checked) {
+        cls='working'; badge='<span class="badge-working">&#9881; 打码平台验证中</span>';
+      } else {
+        cls='waiting'; badge='<span class="badge-waiting">&#9888; 请手动过验证码</span>';
+      }
+    }
+    else if (t.step===0) { cls=''; badge='<span class="badge-working">排队中</span>'; }
+    html += `<div class="task-card ${cls}">
+      <div class="task-id">#${id}</div>
+      <div class="task-info"><div class="task-email">${esc(t.email||'—')}</div><div class="task-step">${esc(t.step_label||(t.step>0?'Step '+t.step+'/8':'等待中'))}</div></div>
+      <div class="task-password">${esc(t.password||'')}</div>
+      <div class="task-badge">${badge}</div>
+    </div>`;
+  }
+  area.innerHTML = html + '</div>';
+}
+
+function renderHistory() {
+  const area = document.getElementById('historyArea');
+  const btnSelect = document.getElementById('btnSelectAll');
+  const btnDelete = document.getElementById('btnDeleteSelected');
+  if (!history.length) {
+    area.innerHTML = '<span style="color:var(--muted);font-size:14px">暂无记录</span>';
+    btnSelect.style.display = 'none';
+    btnDelete.style.display = 'none';
+    return;
+  }
+  btnSelect.style.display = '';
+  btnDelete.style.display = '';
+  let html = '<table class="history-table"><thead><tr><th style="width:32px"><input type="checkbox" id="histCheckAll" onchange="onCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>时间</th><th></th></tr></thead><tbody>';
+  for (const h of history) {
+    html += `<tr>
+      <td><input type="checkbox" class="hist-check" value="${h.id}" onchange="onCheckChange()"></td>
+      <td style="color:var(--muted)">${h.id}</td>
+      <td class="mono">${esc(h.email)}</td>
+      <td class="mono">${esc(h.password)}</td>
+      <td style="color:var(--muted);font-size:12px">${esc(h.time||'')}</td>
+      <td>
+        <button class="copy-btn" onclick="copyRow('${esc(h.email)}','${esc(h.password)}')">复制</button>
+        <button class="copy-btn" onclick="deleteSingle(${h.id})" style="margin-left:4px;border-color:var(--error);color:var(--error)">删除</button>
+      </td>
+    </tr>`;
+  }
+  area.innerHTML = html + '</tbody></table>';
+}
+
+function updateSummary() {
+  const v = Object.values(tasks), total=v.length;
+  const s=v.filter(t=>t.success===true).length, f=v.filter(t=>t.success===false).length;
+  document.getElementById('numTotal').textContent=total;
+  document.getElementById('numSuccess').textContent=s;
+  document.getElementById('numFailed').textContent=f;
+  document.getElementById('numPending').textContent=total-s-f;
+}
+
+async function startReg() {
+  const btn = document.getElementById('btnStart');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        count: parseInt(document.getElementById('count').value),
+        password: document.getElementById('password').value,
+        first_name: document.getElementById('firstName').value,
+        last_name: document.getElementById('lastName').value,
+        browser: document.getElementById('browser').value,
+        country: document.getElementById('country').value,
+        auto_tokens: document.getElementById('autoTokens').checked,
+        ai_captcha: document.getElementById('aiCaptcha').checked,
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert(data.error||'启动失败'); btn.disabled=false; }
+  } catch(e) { alert('请求失败: '+e.message); btn.disabled=false; }
+}
+
+async function stopReg() { await fetch('/api/stop',{method:'POST'}); }
+
+async function forceStart() {
+  const btn = document.getElementById('btnForceStart');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/force-start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        count: parseInt(document.getElementById('count').value) || 3,
+        password: document.getElementById('password').value,
+        first_name: document.getElementById('firstName').value,
+        last_name: document.getElementById('lastName').value,
+        browser: document.getElementById('browser').value,
+        country: document.getElementById('country').value,
+        auto_tokens: document.getElementById('autoTokens').checked,
+        ai_captcha: document.getElementById('aiCaptcha').checked,
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) alert(data.error||'启动失败');
+  } catch(e) { alert('请求失败: '+e.message); }
+  btn.disabled = false;
+}
+
+async function killAllBrowsers() {
+  if (!confirm('确认关闭所有由 GhostReg 管理的浏览器窗口？')) return;
+  const btn = document.getElementById('btnKillAll');
+  btn.disabled = true;
+  btn.textContent = '关闭中...';
+  try {
+    const resp = await fetch('/api/kill-all-browsers', {method:'POST'});
+    const data = await resp.json();
+    alert(data.message || '操作完成');
+  } catch(e) { alert('请求失败: '+e.message); }
+  btn.disabled = false;
+  btn.textContent = '一键关闭所有浏览器';
+}
+
+function copyRow(email, pwd) {
+  navigator.clipboard.writeText(email + ' / ' + pwd);
+}
+
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+// ── 一键填卡 ──
+
+async function refreshBrowsers() {
+  try {
+    const resp = await fetch('/api/browsers');
+    const data = await resp.json();
+    const sel = document.getElementById('cardTarget');
+    sel.innerHTML = '<option value="0">所有窗口（' + data.length + '个）</option>';
+    for (const b of data) {
+      const opt = document.createElement('option');
+      // 用端口号作为 ID（扫描到的浏览器），GhostReg 自己的用 task_id
+      opt.value = b.port || b.task_id || 0;
+      const label = b.browser === 'ghostreg'
+        ? `GhostReg #${b.task_id} - ${b.email || ''}`
+        : `${b.browser} :${b.port} - ${(b.title || b.url || '').substring(0, 40)}`;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
+    if (data.length === 0) {
+      showCardResult('warn', '没有扫描到任何带调试端口的浏览器窗口。如果浏览器是手动打开的（非 GhostReg 启动），暂不支持连接。');
+    } else {
+      showCardResult('ok', `扫描到 ${data.length} 个浏览器窗口`);
+    }
+  } catch(e) {
+    showCardResult('err', '刷新失败: ' + e.message);
+  }
+}
+
+async function fillCard() {
+  const btn = document.getElementById('btnFillCard');
+  btn.disabled = true;
+  btn.textContent = '填写中...';
+
+  const cardNumber = document.getElementById('cardNumber').value.replace(/\s/g, '');
+  const expiry = document.getElementById('cardExpiry').value.trim();
+  const cvv = document.getElementById('cardCvv').value.trim();
+  const cardName = document.getElementById('cardName').value.trim();
+  const taskId = parseInt(document.getElementById('cardTarget').value);
+
+  if (!cardNumber) { showCardResult('err', '请输入卡号'); btn.disabled=false; btn.textContent='一键填写'; return; }
+
+  try {
+    const resp = await fetch('/api/fill-card', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        task_id: taskId,
+        card_number: cardNumber,
+        expiry_date: expiry,
+        cvv: cvv,
+        card_name: cardName,
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      let detail = data.message;
+      if (data.results) {
+        detail += '<br>';
+        for (const r of data.results) {
+          const icon = r.ok ? '&#10003;' : '&#10007;';
+          const cls = r.ok ? 'color:var(--success)' : 'color:var(--error)';
+          const lbl = r.label || r.task_id || '?';
+          detail += `<span style="${cls}">${icon} ${esc(String(lbl))}: ${esc(r.message)}</span><br>`;
+        }
+      }
+      showCardResult('ok', detail);
+    } else {
+      showCardResult('err', data.error || data.message || '填写失败');
+    }
+  } catch(e) {
+    showCardResult('err', '请求失败: ' + e.message);
+  }
+
+  btn.disabled = false;
+  btn.textContent = '一键填写';
+}
+
+async function clearCard() {
+  const btn = document.getElementById('btnClearCard');
+  btn.disabled = true;
+  btn.textContent = '清空中...';
+  const taskId = parseInt(document.getElementById('cardTarget').value);
+
+  try {
+    const resp = await fetch('/api/clear-card', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ task_id: taskId })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      let detail = data.message;
+      if (data.results) {
+        detail += '<br>';
+        for (const r of data.results) {
+          const icon = r.ok ? '&#10003;' : '&#10007;';
+          const cls = r.ok ? 'color:var(--success)' : 'color:var(--error)';
+          const lbl = r.label || '?';
+          detail += `<span style="${cls}">${icon} ${esc(String(lbl))}: ${esc(r.message)}</span><br>`;
+        }
+      }
+      showCardResult('ok', detail);
+    } else {
+      showCardResult('err', data.error || data.message || '清空失败');
+    }
+  } catch(e) {
+    showCardResult('err', '请求失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '一键清空';
+}
+
+async function confirmCard() {
+  const btn = document.getElementById('btnConfirmCard');
+  btn.disabled = true;
+  btn.textContent = '确认中...';
+  const taskId = parseInt(document.getElementById('cardTarget').value);
+
+  try {
+    const resp = await fetch('/api/confirm-card', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ task_id: taskId })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      let detail = data.message;
+      if (data.results) {
+        detail += '<br>';
+        for (const r of data.results) {
+          const icon = r.ok ? '&#10003;' : '&#10007;';
+          const cls = r.ok ? 'color:var(--success)' : 'color:var(--error)';
+          const lbl = r.label || '?';
+          detail += `<span style="${cls}">${icon} ${esc(String(lbl))}: ${esc(r.message)}</span><br>`;
+        }
+      }
+      showCardResult('ok', detail);
+    } else {
+      showCardResult('err', data.error || data.message || '确认失败');
+    }
+  } catch(e) {
+    showCardResult('err', '请求失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '一键确认';
+}
+
+function showCardResult(type, msg) {
+  const el = document.getElementById('cardResult');
+  el.style.display = 'block';
+  if (type === 'ok') {
+    el.style.color = 'var(--success)';
+  } else if (type === 'warn') {
+    el.style.color = 'var(--warning)';
+  } else {
+    el.style.color = 'var(--error)';
+  }
+  el.innerHTML = msg;
+}
+
+// 有效期输入自动格式化 MM/YY
+document.getElementById('cardExpiry').addEventListener('input', function(e) {
+  let v = this.value.replace(/[^\d]/g, '');
+  if (v.length >= 2) {
+    v = v.substring(0, 2) + '/' + v.substring(2, 4);
+  }
+  this.value = v;
+});
+
+// 卡号输入只允许数字和空格
+document.getElementById('cardNumber').addEventListener('input', function(e) {
+  this.value = this.value.replace(/[^\d\s]/g, '');
+});
+
+// ── 历史记录删除 ──
+
+function onCheckAll(el) {
+  document.querySelectorAll('.hist-check').forEach(cb => cb.checked = el.checked);
+  onCheckChange();
+}
+
+function onCheckChange() {
+  const checked = document.querySelectorAll('.hist-check:checked');
+  const btn = document.getElementById('btnDeleteSelected');
+  btn.textContent = checked.length > 0 ? `删除选中 (${checked.length})` : '删除选中';
+}
+
+function toggleSelectAll() {
+  const checkAll = document.getElementById('histCheckAll');
+  if (checkAll) {
+    checkAll.checked = !checkAll.checked;
+    onCheckAll(checkAll);
+  }
+}
+
+async function deleteSingle(id) {
+  if (!confirm('确认删除这条记录？')) return;
+  await _doDelete([id]);
+}
+
+async function deleteSelected() {
+  const checks = document.querySelectorAll('.hist-check:checked');
+  if (!checks.length) { alert('请先勾选要删除的记录'); return; }
+  const ids = Array.from(checks).map(c => parseInt(c.value));
+  if (!confirm(`确认删除 ${ids.length} 条记录？`)) return;
+  await _doDelete(ids);
+}
+
+async function _doDelete(ids) {
+  try {
+    const resp = await fetch('/api/history/delete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ids: ids })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      // 服务端会通过 WebSocket 推送 history_update，但也主动刷新
+      const hResp = await fetch('/api/history');
+      history = await hResp.json();
+      renderHistory();
+    } else {
+      alert(data.error || '删除失败');
+    }
+  } catch(e) {
+    alert('删除失败: ' + e.message);
+  }
+}
+
+// ── 打开浏览器 ──
+
+async function openBrowsers() {
+  const btn = document.getElementById('btnOpenBrowser');
+  btn.disabled = true;
+  btn.textContent = '打开中...';
+  const count = parseInt(document.getElementById('openBrowserCount').value) || 1;
+  const browser = document.getElementById('openBrowserType').value;
+
+  try {
+    const resp = await fetch('/api/open-browsers', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ count: count, browser: browser })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      showCardResult('ok', data.message + ' — 请在弹出的窗口中登录 JetBrains 账号，然后导航到绑卡页面');
+      // 自动刷新窗口列表
+      setTimeout(refreshBrowsers, 2000);
+    } else {
+      showCardResult('err', data.error || data.message || '打开失败');
+    }
+  } catch(e) {
+    showCardResult('err', '请求失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '打开浏览器';
+}
+
+// ── 自动跳转绑卡 ──
+
+function toggleCountrySelect() {
+  const checked = document.getElementById('autoTokens').checked;
+  document.getElementById('countryGroup').style.display = checked ? '' : 'none';
+  document.getElementById('autoTokensHint').style.display = checked ? '' : 'none';
+}
+
+async function loadCountries() {
+  try {
+    const resp = await fetch('/api/countries');
+    const data = await resp.json();
+    const sel = document.getElementById('country');
+    sel.innerHTML = '';
+    for (const c of data) {
+      const opt = document.createElement('option');
+      opt.value = c.code;
+      opt.textContent = `${c.name} (${c.code})`;
+      if (c.code === 'JP') opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch(e) {
+    console.error('加载国家列表失败:', e);
+  }
+}
+
+// ── API Key 配置 ──
+
+async function loadApiKey() {
+  try {
+    const resp = await fetch('/api/settings');
+    const data = await resp.json();
+    const el = document.getElementById('apiKeyStatus');
+    const panel = el.closest('.panel');
+    const title = document.getElementById('apiKeyTitle');
+    if (data.api_key_set) {
+      el.style.color = 'var(--success)';
+      el.innerHTML = '&#10003; API Key 已保存: ' + data.api_key_masked + '（重启程序无需重新配置）';
+      panel.style.borderColor = 'var(--success)';
+      panel.style.background = 'rgba(34,197,94,.08)';
+      title.style.color = 'var(--success)';
+      title.textContent = 'API Key 已配置，可以开始注册';
+    } else {
+      el.style.color = 'var(--error)';
+      el.textContent = '未配置 API Key，请先设置后再开始注册';
+      panel.style.borderColor = 'var(--error)';
+      panel.style.background = 'rgba(239,68,68,.08)';
+      title.style.color = 'var(--error)';
+      title.textContent = '!! 重要：首次使用前必须配置邮箱 API Key !!';
+    }
+  } catch(e) {
+    console.error('加载 API Key 失败:', e);
+  }
+}
+
+async function saveApiKey() {
+  const key = document.getElementById('apiKey').value.trim();
+  if (!key) { alert('请输入 API Key'); return; }
+  const btn = document.getElementById('btnSaveKey');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  try {
+    const resp = await fetch('/api/settings/api-key', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ api_key: key })
+    });
+    const data = await resp.json();
+    const el = document.getElementById('apiKeyStatus');
+    if (data.ok) {
+      el.style.color = 'var(--success)';
+      el.textContent = data.message;
+      document.getElementById('apiKey').value = '';
+      loadApiKey();
+    } else {
+      el.style.color = 'var(--error)';
+      el.textContent = data.error;
+    }
+  } catch(e) {
+    alert('保存失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '保存';
+}
+
+// ── 打码平台配置 ──
+
+async function loadCaptchaConfig() {
+  try {
+    const resp = await fetch('/api/captcha-settings');
+    const data = await resp.json();
+    const el = document.getElementById('captchaStatus');
+    const panel = document.getElementById('captchaPanel');
+    const title = document.getElementById('captchaTitle');
+    const sel = document.getElementById('captchaPlatform');
+
+    if (data.platform) sel.value = data.platform;
+
+    if (data.client_key_set) {
+      let msg = '&#10003; 已配置: ' + data.client_key_masked;
+      if (data.balance !== null && data.balance !== undefined) {
+        msg += ' — 余额: ' + data.balance + ' 积分';
+      }
+      el.style.color = 'var(--success)';
+      el.innerHTML = msg;
+      panel.style.borderColor = 'var(--success)';
+      panel.style.background = 'rgba(34,197,94,.08)';
+      title.style.color = 'var(--success)';
+      title.textContent = '打码平台已配置 — reCAPTCHA 将自动解决';
+    } else {
+      el.style.color = 'var(--muted)';
+      el.textContent = '未配置，注册时需手动过验证码或使用 AI';
+      panel.style.borderColor = 'var(--border)';
+      panel.style.background = 'var(--card)';
+      title.style.color = 'var(--muted)';
+      title.textContent = '打码平台配置（可选 — reCAPTCHA 自动过验证）';
+    }
+  } catch(e) {
+    console.error('加载打码平台配置失败:', e);
+  }
+}
+
+async function saveCaptchaConfig() {
+  const key = document.getElementById('captchaKey').value.trim();
+  const platform = key ? 'yescaptcha' : '';
+  if (!key) { alert('请输入 YesCaptcha 的 ClientKey'); return; }
+  const btn = document.getElementById('btnSaveCaptcha');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+  try {
+    const resp = await fetch('/api/captcha-settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ platform: platform, client_key: key })
+    });
+    const data = await resp.json();
+    const el = document.getElementById('captchaStatus');
+    if (data.ok) {
+      el.style.color = 'var(--success)';
+      el.textContent = data.message;
+      document.getElementById('captchaKey').value = '';
+      loadCaptchaConfig();
+    } else {
+      el.style.color = 'var(--error)';
+      el.textContent = data.error;
+    }
+  } catch(e) {
+    alert('保存失败: ' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '保存';
+}
+
+// ── Tab 切换 ──
+
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', (tab==='browser' && i===0) || (tab==='protocol' && i===1));
+  });
+  document.getElementById('tab-browser').classList.toggle('active', tab==='browser');
+  document.getElementById('tab-protocol').classList.toggle('active', tab==='protocol');
+  if (tab==='protocol') loadProtoHistory();
+}
+
+// ── 批量自动登录 ──
+
+function parseAccountLines(text) {
+  // 智能提取邮箱和密码，支持各种乱七八糟的格式：
+  // 1. email----password / email:password / email password / email\tpassword
+  // 2. email / password（斜杠分隔，从已注册账号复制按钮来的）
+  // 3. JSON 格式（从 accounts.json 复制）: "email": "xxx", "password": "xxx"
+  // 4. CSV: email,password
+  // 5. 表格、日志、随便什么格式，只要有邮箱就尝试提取
+
+  const emailRegex = /[\w.+-]+@[\w.-]+\.\w{2,}/g;
+  const allEmails = [];
+  const emailPasswordMap = {};
+
+  // 第一轮：尝试从 JSON 格式提取 email+password 配对
+  // 匹配 "email": "xxx@yyy.zzz" ... "password": "abc"
+  const jsonBlocks = text.split(/\},?\s*\{?/);
+  for (const block of jsonBlocks) {
+    const em = block.match(/"email"\s*:\s*"([^"]+@[^"]+)"/);
+    const pw = block.match(/"password"\s*:\s*"([^"]+)"/);
+    if (em && pw) {
+      emailPasswordMap[em[1]] = pw[1];
+    }
+  }
+
+  // 如果 JSON 模式已经提取到了，直接返回
+  if (Object.keys(emailPasswordMap).length > 0) {
+    return Object.entries(emailPasswordMap).map(([email, password]) => ({email, password}));
+  }
+
+  // 第二轮：按行提取
+  const singleEmailRegex = /[\w.+-]+@[\w.-]+\.\w{2,}/;
+  const lines = text.trim().split('\n').filter(l => l.trim());
+  const accounts = [];
+
+  for (const line of lines) {
+    const l = line.trim();
+    if (!l) continue;
+
+    const emailMatch = l.match(singleEmailRegex);
+    if (!emailMatch) continue;
+    const email = emailMatch[0];
+
+    // 从邮箱之后的部分提取密码
+    let rest = l.substring(l.indexOf(email) + email.length);
+    // 去掉所有常见分隔符（含 / 斜杠、---- 连字符等）
+    rest = rest.replace(/^[\s,;|:\/\-—"']+/, '').trim();
+    // 去掉字段标签
+    rest = rest.replace(/^(password|pwd|pass|密码)\s*[:=：]\s*/i, '').trim();
+    // 去掉引号逗号等 JSON 残留
+    rest = rest.replace(/^["']+/, '').replace(/["',}\]]+$/, '').trim();
+
+    let password = '';
+    if (rest) {
+      // 取第一个有效 token
+      const parts = rest.split(/[\s,;|\/]+/);
+      password = parts[0].replace(/['"]/g, '').trim();
+    }
+
+    // 如果从后面没提取到，尝试从前面提取
+    if (!password) {
+      let before = l.substring(0, l.indexOf(email));
+      before = before.replace(/[\s,;|:\/\-—"']+$/, '').trim();
+      if (before) {
+        const parts = before.split(/[\s,;|\/]+/);
+        password = parts[parts.length - 1].replace(/['"]/g, '').trim();
+      }
+    }
+
+    // 过滤掉明显不是密码的东西（纯数字ID、时间戳等）
+    if (password && password.length >= 4 && !/^\d{1,3}$/.test(password) && !/^\d{4}-\d{2}/.test(password)) {
+      accounts.push({ email, password });
+    }
+  }
+  return accounts;
+}
+
+// 登录面板的国家下拉加载（复用注册的国家列表 API）
+(async function loadLoginCountries() {
+  try {
+    const resp = await fetch('/api/countries');
+    const countries = await resp.json();
+    const sel = document.getElementById('loginCountry');
+    countries.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.code;
+      opt.textContent = c.name;
+      if (c.code === 'JP') opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch(e) {}
+})();
+
+// 勾选自动跳转绑卡时显示国家选择
+document.getElementById('loginAutoTokens').addEventListener('change', function() {
+  document.getElementById('loginCountryGroup').style.display = this.checked ? '' : 'none';
+});
+
+// 协议登录（推荐）：纯 HTTP 登录 + Cookie 注入浏览器
+async function protoLogin() {
+  const text = document.getElementById('loginAccounts').value;
+  const accounts = parseAccountLines(text);
+  if (accounts.length === 0) {
+    alert('请输入至少一个账号（格式：邮箱----密码 或 邮箱:密码）');
+    return;
+  }
+  if (accounts.length > 20) {
+    if (!confirm('你输入了 ' + accounts.length + ' 个账号，最多支持 20 个。确定继续？')) return;
+  }
+
+  const btn = document.getElementById('btnProtoLogin');
+  const btn2 = document.getElementById('btnAutoLogin');
+  btn.disabled = true; btn2.disabled = true;
+  btn.textContent = '协议登录中...';
+  document.getElementById('loginStatus').innerHTML = '<span style="color:#10b981">正在协议登录 ' + accounts.length + ' 个账号（纯 HTTP + Cookie 注入）...</span>';
+  document.getElementById('loginResults').innerHTML = '';
+
+  try {
+    const loginWorkersVal = parseInt(document.getElementById('loginWorkers').value) || 5;
+    const body = {
+      accounts: accounts,
+      browser: document.getElementById('loginBrowser').value,
+      auto_tokens: document.getElementById('loginAutoTokens').checked,
+      country: document.getElementById('loginCountry').value,
+      workers: Math.max(1, Math.min(loginWorkersVal, 15)),
+    };
+    const resp = await fetch('/api/proto-login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await resp.json();
+    if (d.ok) {
+      document.getElementById('loginStatus').innerHTML = '<span style="color:var(--success)">' + d.message + '</span>';
+    } else {
+      document.getElementById('loginStatus').innerHTML = '<span style="color:var(--error)">' + (d.error||'启动失败') + '</span>';
+    }
+  } catch(e) {
+    document.getElementById('loginStatus').innerHTML = '<span style="color:var(--error)">请求失败: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false; btn2.disabled = false;
+    btn.textContent = '协议登录（推荐，秒开）';
+  }
+}
+
+// 浏览器登录（备用）：自动化填表单
+async function autoLogin() {
+  const text = document.getElementById('loginAccounts').value;
+  const accounts = parseAccountLines(text);
+  if (accounts.length === 0) {
+    alert('请输入至少一个账号（格式：邮箱----密码 或 邮箱:密码）');
+    return;
+  }
+  if (accounts.length > 20) {
+    if (!confirm('你输入了 ' + accounts.length + ' 个账号，最多支持 20 个。确定继续？')) return;
+  }
+
+  const btn = document.getElementById('btnAutoLogin');
+  const btn2 = document.getElementById('btnProtoLogin');
+  btn.disabled = true; btn2.disabled = true;
+  btn.textContent = '登录中...';
+  document.getElementById('loginStatus').textContent = '正在打开 ' + accounts.length + ' 个浏览器窗口并自动化登录...';
+  document.getElementById('loginResults').innerHTML = '';
+
+  try {
+    const loginWorkersVal = parseInt(document.getElementById('loginWorkers').value) || 5;
+    const body = {
+      accounts: accounts,
+      browser: document.getElementById('loginBrowser').value,
+      auto_tokens: document.getElementById('loginAutoTokens').checked,
+      country: document.getElementById('loginCountry').value,
+      workers: Math.max(1, Math.min(loginWorkersVal, 15)),
+    };
+    const resp = await fetch('/api/auto-login', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await resp.json();
+    if (d.ok) {
+      document.getElementById('loginStatus').innerHTML = '<span style="color:var(--success)">' + d.message + '（请等待浏览器窗口弹出并完成登录）</span>';
+    } else {
+      document.getElementById('loginStatus').innerHTML = '<span style="color:var(--error)">' + (d.error||'启动失败') + '</span>';
+    }
+  } catch(e) {
+    document.getElementById('loginStatus').innerHTML = '<span style="color:var(--error)">请求失败: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false; btn2.disabled = false;
+    btn.textContent = '浏览器登录（慢）';
+  }
+}
+
+// WebSocket 接收登录结果
+function handleLoginCompleted(data) {
+  const el = document.getElementById('loginResults');
+  let html = '<div style="margin-top:6px"><strong>登录结果：' + data.success + '/' + data.total + ' 成功</strong></div>';
+  (data.results || []).forEach(r => {
+    const color = r.ok ? 'var(--success)' : 'var(--error)';
+    const icon = r.ok ? '✓' : '✗';
+    html += '<div style="color:' + color + ';font-size:11px">' + icon + ' ' + esc(r.email) + ' — ' + esc(r.message) + '</div>';
+  });
+  el.innerHTML = html;
+  document.getElementById('loginStatus').textContent = '登录完成';
+}
+
+
+// ── CF 代理池管理 ──
+
+function cfToggleProxy(checked) {
+  document.getElementById('cfPanel').style.display = checked ? '' : 'none';
+  if (checked) cfLoadSettings();
+}
+
+async function cfLoadSettings() {
+  try {
+    const resp = await fetch('/api/cf/settings');
+    const d = await resp.json();
+    document.getElementById('cfApiToken').value = d.api_token || '';
+    document.getElementById('cfAccountId').value = d.account_id || '';
+    document.getElementById('cfWorkersCount').value = d.workers_count || 1;
+    document.getElementById('cfLadderProxy').value = d.ladder_proxy || '';
+    if (d.deployed) {
+      cfUpdateBadge(true, d.deployed.healthy + '/' + d.deployed.deployed + ' Workers');
+      document.getElementById('cfStatus').innerHTML = d.deployed.workers.map(w =>
+        '<div>' + w.name + ': ' + (w.healthy ? '<span style="color:var(--success)">OK</span>' : '<span style="color:var(--error)">Down</span>') + ' — ' + w.url + '</div>'
+      ).join('');
+    }
+  } catch(e) { console.error('CF load error:', e); }
+}
+
+async function cfSaveAndDeploy() {
+  const btn = document.getElementById('btnCfDeploy');
+  const token = document.getElementById('cfApiToken').value.trim();
+  const accountId = document.getElementById('cfAccountId').value.trim();
+  const count = parseInt(document.getElementById('cfWorkersCount').value) || 1;
+  const ladder = document.getElementById('cfLadderProxy').value.trim();
+
+  if (!token || !accountId) { alert('请填写 API Token 和 Account ID'); return; }
+  if (!ladder) { alert('请填写梯子代理地址（workers.dev 在大陆需要梯子访问）'); return; }
+
+  btn.disabled = true;
+  btn.textContent = '部署中...';
+  document.getElementById('cfStatus').textContent = '正在保存配置并部署 Workers...';
+
+  try {
+    // 保存配置
+    await fetch('/api/cf/settings', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ api_token:token, account_id:accountId, workers_count:count, ladder_proxy:ladder, enabled:true })
+    });
+    // 部署
+    const resp = await fetch('/api/cf/deploy', {method:'POST'});
+    const d = await resp.json();
+    if (d.ok) {
+      cfUpdateBadge(true, d.status.healthy + '/' + d.status.deployed + ' Workers');
+      document.getElementById('cfStatus').innerHTML = '<span style="color:var(--success)">Workers 部署成功!</span> ' +
+        d.status.workers.map(w => w.url).join(', ');
+    } else {
+      cfUpdateBadge(false, '部署失败');
+      document.getElementById('cfStatus').innerHTML = '<span style="color:var(--error)">' + (d.error||'部署失败') + '</span>';
+    }
+  } catch(e) {
+    document.getElementById('cfStatus').innerHTML = '<span style="color:var(--error)">请求失败: ' + e.message + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存并部署 Workers';
+  }
+}
+
+async function cfHealthCheck() {
+  document.getElementById('cfStatus').textContent = '检查中...';
+  try {
+    const resp = await fetch('/api/cf/health', {method:'POST'});
+    const d = await resp.json();
+    if (d.ok) {
+      const entries = Object.entries(d.health);
+      document.getElementById('cfStatus').innerHTML = entries.map(([name, info]) =>
+        '<div>' + name + ': ' + (info.healthy ? '<span style="color:var(--success)">OK</span>' : '<span style="color:var(--error)">Down — ' + (info.error||'') + '</span>') + '</div>'
+      ).join('');
+    } else {
+      document.getElementById('cfStatus').innerHTML = '<span style="color:var(--error)">' + (d.error||'检查失败') + '</span>';
+    }
+  } catch(e) { document.getElementById('cfStatus').innerHTML = '<span style="color:var(--error)">' + e.message + '</span>'; }
+}
+
+async function cfCleanup() {
+  if (!confirm('确认删除所有已部署的 Workers？')) return;
+  try {
+    await fetch('/api/cf/cleanup', {method:'POST'});
+    cfUpdateBadge(false, '未部署');
+    document.getElementById('cfStatus').textContent = 'Workers 已删除';
+  } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+function cfUpdateBadge(ok, text) {
+  const badge = document.getElementById('cfProxyBadge');
+  badge.textContent = text;
+  badge.style.background = ok ? 'rgba(16,185,129,.15)' : 'var(--border)';
+  badge.style.color = ok ? 'var(--success)' : 'var(--muted)';
+}
+
+// ── 协议注册机 ──
+
+let protoTasks = {}, protoHistoryData = [];
+
+async function protoStart() {
+  const btn = document.getElementById('btnProtoStart');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/proto/start', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        count: parseInt(document.getElementById('protoCount').value) || 3,
+        password: document.getElementById('protoPassword').value || 'QPalzmw123',
+        first_name: document.getElementById('protoFirstName').value || null,
+        last_name: document.getElementById('protoLastName').value || null,
+        workers: parseInt(document.getElementById('protoWorkers').value) || 3,
+        use_proxy: document.getElementById('protoUseProxy').checked,
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) { alert(data.error||'启动失败'); btn.disabled=false; }
+  } catch(e) { alert('请求失败: '+e.message); btn.disabled=false; }
+}
+
+async function protoStop() {
+  await fetch('/api/proto/stop',{method:'POST'});
+}
+
+function renderProtoTasks() {
+  const area = document.getElementById('protoTaskArea');
+  const ids = Object.keys(protoTasks).map(Number).sort((a,b)=>a-b);
+  if (!ids.length) return;
+  document.getElementById('protoSummary').style.display = 'flex';
+  let html = '<div class="task-list">';
+  for (const id of ids) {
+    const t = protoTasks[id];
+    let cls='working', badge='<span class="badge-working">&#9881; '+esc(t.step||'进行中')+'</span>';
+    if (t.success===true) { cls='done'; badge='<span class="badge-done">&#10003; 成功 ('+t.elapsed+'s)</span>'; }
+    else if (t.success===false) { cls='failed'; badge='<span class="badge-failed">&#10007; 失败</span>'; }
+    html += `<div class="task-card ${cls}">
+      <div class="task-id">#${id}</div>
+      <div class="task-info"><div class="task-email">${esc(t.email||'—')}</div><div class="task-step">${esc(t.step||'等待中')}</div></div>
+      <div class="task-password" style="font-family:Consolas,monospace;font-size:13px;color:var(--muted)">${t.success?esc(document.getElementById('protoPassword').value):''}</div>
+      <div class="task-badge">${badge}</div>
+    </div>`;
+  }
+  area.innerHTML = html + '</div>';
+  // 更新统计
+  const v = Object.values(protoTasks), total=v.length;
+  const s=v.filter(t=>t.success===true).length, f=v.filter(t=>t.success===false).length;
+  document.getElementById('protoNumTotal').textContent=total;
+  document.getElementById('protoNumSuccess').textContent=s;
+  document.getElementById('protoNumFailed').textContent=f;
+  document.getElementById('protoNumPending').textContent=total-s-f;
+}
+
+function renderProtoHistory() {
+  const area = document.getElementById('protoHistoryArea');
+  const btnSelect = document.getElementById('btnProtoSelectAll');
+  const btnDelete = document.getElementById('btnProtoDeleteSelected');
+  if (!protoHistoryData.length) {
+    area.innerHTML = '<span style="color:var(--muted);font-size:14px">暂无记录</span>';
+    btnSelect.style.display = 'none';
+    btnDelete.style.display = 'none';
+    return;
+  }
+  btnSelect.style.display = '';
+  btnDelete.style.display = '';
+  let html = '<table class="history-table"><thead><tr><th style="width:32px"><input type="checkbox" id="protoCheckAll" onchange="protoOnCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>耗时</th><th>时间</th><th></th></tr></thead><tbody>';
+  for (let i=0; i<protoHistoryData.length; i++) {
+    const h = protoHistoryData[i];
+    const idx = i;
+    html += `<tr>
+      <td><input type="checkbox" class="proto-hist-check" value="${idx}" onchange="protoOnCheckChange()"></td>
+      <td style="color:var(--muted)">${i+1}</td>
+      <td class="mono">${esc(h.email||'')}</td>
+      <td class="mono">${esc(h.password||'')}</td>
+      <td style="color:var(--muted);font-size:12px">${h.elapsed ? h.elapsed+'s' : ''}</td>
+      <td style="color:var(--muted);font-size:12px">${esc(h.timestamp||'')}</td>
+      <td>
+        <button class="copy-btn" onclick="copyRow('${esc(h.email||'')}','${esc(h.password||'')}')">复制</button>
+        <button class="copy-btn" onclick="protoDeleteSingle(${idx})" style="margin-left:4px;border-color:var(--error);color:var(--error)">删除</button>
+      </td>
+    </tr>`;
+  }
+  area.innerHTML = html + '</tbody></table>';
+}
+
+function protoOnCheckAll(el) {
+  document.querySelectorAll('.proto-hist-check').forEach(cb => cb.checked = el.checked);
+  protoOnCheckChange();
+}
+function protoOnCheckChange() {
+  const checked = document.querySelectorAll('.proto-hist-check:checked');
+  document.getElementById('btnProtoDeleteSelected').textContent = checked.length > 0 ? `删除选中 (${checked.length})` : '删除选中';
+}
+function protoToggleSelectAll() {
+  const checkAll = document.getElementById('protoCheckAll');
+  if (checkAll) { checkAll.checked = !checkAll.checked; protoOnCheckAll(checkAll); }
+}
+async function protoDeleteSingle(idx) {
+  if (!confirm('确认删除这条记录？')) return;
+  await _protoDoDelete([idx]);
+}
+async function protoDeleteSelected() {
+  const checks = document.querySelectorAll('.proto-hist-check:checked');
+  if (!checks.length) { alert('请先勾选要删除的记录'); return; }
+  const idxs = Array.from(checks).map(c => parseInt(c.value));
+  if (!confirm(`确认删除 ${idxs.length} 条记录？`)) return;
+  await _protoDoDelete(idxs);
+}
+async function _protoDoDelete(indexes) {
+  try {
+    const resp = await fetch('/api/proto/history/delete', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ indexes: indexes })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      protoHistoryData = data.history || [];
+      renderProtoHistory();
+    } else { alert(data.error || '删除失败'); }
+  } catch(e) { alert('删除失败: ' + e.message); }
+}
+
+async function loadProtoHistory() {
+  try {
+    const resp = await fetch('/api/proto/history');
+    protoHistoryData = await resp.json();
+    renderProtoHistory();
+  } catch(e) { console.error('加载协议注册历史失败:', e); }
+}
+
+// 扩展 WebSocket 消息处理
+const _origHandleMessage = handleMessage;
+handleMessage = function(msg) {
+  if (msg.type === 'proto_started') {
+    protoTasks = msg.tasks || {};
+    document.getElementById('btnProtoStart').style.display='none';
+    document.getElementById('btnProtoStop').style.display='';
+    document.getElementById('protoDot').className = 'status-dot running';
+    document.getElementById('protoStatusText').textContent = '注册中...';
+    renderProtoTasks();
+  }
+  else if (msg.type === 'proto_update') {
+    protoTasks[msg.task.task_id] = msg.task;
+    renderProtoTasks();
+  }
+  else if (msg.type === 'proto_completed') {
+    protoTasks = msg.tasks || {};
+    protoHistoryData = msg.history || [];
+    document.getElementById('btnProtoStart').style.display='';
+    document.getElementById('btnProtoStart').disabled=false;
+    document.getElementById('btnProtoStop').style.display='none';
+    document.getElementById('protoDot').className = 'status-dot';
+    const s = Object.values(protoTasks).filter(t=>t.success===true).length;
+    const total = Object.keys(protoTasks).length;
+    document.getElementById('protoStatusText').textContent = `完成 — 成功 ${s}/${total}`;
+    renderProtoTasks();
+    renderProtoHistory();
+  }
+  else if (msg.type === 'login_completed') {
+    handleLoginCompleted(msg);
+  }
+  else {
+    _origHandleMessage(msg);
+  }
+};
+
+loadApiKey();
+loadCaptchaConfig();
+loadCountries();
+connectWS();
+</script>
+</body>
+</html>
