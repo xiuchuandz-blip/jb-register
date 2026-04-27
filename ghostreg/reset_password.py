@@ -14,6 +14,8 @@ from urllib.parse import urlparse, parse_qs
 import httpx
 from curl_cffi.requests import Session as CurlSession
 
+from pathlib import Path
+
 from . import config
 from .email_service import (
     _get_api_key, _new_client, _account_cache,
@@ -24,37 +26,84 @@ logger = logging.getLogger("ghostreg.reset_password")
 
 BASE_URL = "https://account.jetbrains.com"
 
+# 持久化 token 缓存文件（防止 app 重启后 token 丢失）
+_TOKEN_CACHE_FILE = Path(__file__).parent.parent / "output" / "email_token_cache.json"
 
-# ── YYDS 邮箱重建（指定 localPart + domain） ──
+
+def _load_token_cache() -> dict:
+    if _TOKEN_CACHE_FILE.exists():
+        try:
+            import json as _json
+            return _json.loads(_TOKEN_CACHE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {}
+
+
+def _save_token_cache(cache: dict):
+    import json as _json
+    _TOKEN_CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _TOKEN_CACHE_FILE.write_text(_json.dumps(cache, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def _remove_from_token_cache(email: str):
+    cache = _load_token_cache()
+    if email in cache:
+        del cache[email]
+        _save_token_cache(cache)
+
+
+# ── YYDS 邮箱重建（指定 localPart + domain，带持久化 token 缓存） ──
 
 def apply_email_exact(local_part: str, domain: str) -> str:
     """
     用指定的 localPart + domain 重新创建 YYDS Mail 临时邮箱。
-    用于找回密码时重新激活已删除的同一邮箱地址。
+    若邮箱已存在（409），尝试从持久化缓存恢复 token；
+    缓存也在创建成功时保存，确保 app 重启后仍可使用。
     """
+    email = f"{local_part}@{domain}"
+
+    # 先尝试从持久化缓存恢复
+    token_cache = _load_token_cache()
+    if email in token_cache:
+        cached = token_cache[email]
+        _account_cache[email] = cached
+        logger.info(f"从缓存恢复邮箱 token: {email}")
+        return email
+
     api_key = _get_api_key()
     client = _new_client()
-    email = f"{local_part}@{domain}"
     try:
         resp = client.post(
             f"{config.YYDS_API_BASE}/accounts",
             headers={"X-API-Key": api_key, "Content-Type": "application/json"},
             json={"localPart": local_part, "domain": domain},
         )
-        resp.raise_for_status()
         result = resp.json()
     finally:
         client.close()
 
     if not result.get("success"):
+        err_code = result.get("errorCode", "")
+        if err_code == "address_already_in_use":
+            raise RuntimeError(
+                f"邮箱 {email} 已被占用且 token 缓存已失效（可能是上次改密任务中途中断）。"
+                f"请等待几分钟后重试，YYDS Mail 会自动释放闲置邮箱地址。"
+            )
         raise RuntimeError(f"YYDS Mail 创建邮箱失败: {result}")
 
     account = result["data"]
-    _account_cache[email] = {
+    entry = {
         "id": account["id"],
         "token": account["token"],
         "domain": domain,
     }
+    _account_cache[email] = entry
+
+    # 持久化保存 token，防止 app 重启丢失
+    token_cache[email] = entry
+    _save_token_cache(token_cache)
+
     logger.info(f"临时邮箱重建成功: {email}")
     return email
 
@@ -78,7 +127,7 @@ def extract_reset_link(content: str) -> str | None:
     return None
 
 
-def poll_email_for_reset(email: str, timeout: float = 120, interval: float = 5) -> dict:
+def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5) -> dict:
     """
     轮询邮件箱，寻找 JetBrains 密码重置邮件。
     返回 {"type": "link", "value": url} 或 {"type": "code", "value": "123456"}
@@ -135,183 +184,212 @@ class JBPasswordResetter:
         self.csrf = ""
         self.session_id = ""
 
-    def _hdrs(self) -> dict:
-        h = {"Content-Type": "application/json", "Accept": "application/json"}
-        if self.csrf:
-            h["X-XSRF-TOKEN"] = self.csrf
-        return h
+    def _browser_headers(self) -> dict:
+        return {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Referer": f"{BASE_URL}/forgot-password",
+        }
 
-    def _refresh_csrf(self, path: str = "/forgot-password"):
-        """访问页面以获取最新的 CSRF cookie。"""
-        try:
-            resp = self.s.get(f"{BASE_URL}{path}", timeout=20)
-            self.csrf = self.s.cookies.get("_st-JBA", "")
-            logger.info(f"  CSRF 刷新: {self.csrf[:20] if self.csrf else '(空)'}...")
-        except Exception as e:
-            logger.warning(f"  刷新 CSRF 失败: {e}")
-
-    # ── Step A：触发忘记密码邮件 ──
+    # ── Step A：触发忘记密码邮件（表单 POST 方式）──
 
     def request_forgot_password(self, email: str) -> bool:
         """
-        向 JetBrains 请求发送密码重置邮件。
-        依次尝试多个可能的 API 端点，返回 True 表示触发成功。
-        """
-        self._refresh_csrf("/forgot-password")
-
-        candidates = [
-            ("POST", f"{BASE_URL}/api/auth/restore-password",
-             {"email": email}),
-            ("POST", f"{BASE_URL}/api/auth/forgot-password",
-             {"email": email}),
-            ("POST", f"{BASE_URL}/api/account/password/reset-request",
-             {"email": email}),
-            ("POST", f"{BASE_URL}/api/account/forgot-password",
-             {"email": email}),
-        ]
-
-        for method, url, body in candidates:
-            try:
-                resp = self.s.post(url, headers=self._hdrs(), json=body, timeout=20)
-                logger.info(f"  {url}: HTTP {resp.status_code}")
-                if resp.status_code in (200, 204):
-                    logger.info(f"  ✓ 触发成功 → {url}")
-                    return True
-                if resp.status_code == 404:
-                    continue
-                if resp.status_code == 400:
-                    # 可能是邮箱不存在
-                    try:
-                        err = resp.json()
-                        logger.warning(f"  400 详情: {err}")
-                    except Exception:
-                        pass
-                    return False
-            except Exception as e:
-                logger.warning(f"  {url} 异常: {e}")
-                continue
-
-        # 最后兜底：session 方式
-        return self._request_via_session(email)
-
-    def _request_via_session(self, email: str) -> bool:
-        """
-        通过 auth session API 触发找回密码（备用方案）：
-        创建 session → 提交邮箱登录 → JetBrains 发验证码/链接。
+        向 JetBrains 提交忘记密码表单，触发发送密码重置邮件。
+        真实接口：POST /request-password-reset?_st=<csrf>
+        表单字段：username=<email>
         """
         try:
-            self._refresh_csrf("/login")
+            # Step 1: 获取忘记密码页面，提取 CSRF token 和 form action
+            r = self.s.get(
+                f"{BASE_URL}/forgot-password",
+                headers=self._browser_headers(),
+                timeout=20,
+            )
+            logger.info(f"  GET /forgot-password: HTTP {r.status_code}")
+            if r.status_code != 200:
+                return False
+
+            # 从 form action 提取完整的提交 URL（含 _st=... CSRF token）
+            action_match = re.search(
+                r'action="(/request-password-reset\?[^"]+)"', r.text
+            )
+            if not action_match:
+                logger.warning("  未找到 form action，尝试备用方案")
+                return self._request_via_session(email)
+
+            action_path = action_match.group(1)
+            post_url = f"{BASE_URL}{action_path}"
+            logger.info(f"  Form action: {post_url[:80]}...")
+
+            # Step 2: 提交表单（字段名为 username，支持邮箱或用户名）
+            r2 = self.s.post(
+                post_url,
+                data={"username": email},
+                headers={
+                    **self._browser_headers(),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                timeout=20,
+            )
+            logger.info(f"  POST /request-password-reset: HTTP {r2.status_code}")
+
+            if r2.status_code in (200, 302):
+                logger.info("  ✓ 忘记密码请求成功，JetBrains 将发送重置邮件")
+                return True
+
+            logger.warning(f"  非预期状态码: {r2.status_code}")
+            return False
+
+        except Exception as e:
+            logger.warning(f"  form 方式失败: {e}，尝试备用方案")
+            return self._request_via_session(email)
+
+    def _request_via_session(self, email: str) -> bool:
+        """备用方案：通过 session API 触发登录 OTP（用于后续验证）"""
+        try:
+            r = self.s.get(f"{BASE_URL}/login", headers=self._browser_headers(), timeout=20)
+            csrf = self.s.cookies.get("_st-JBA", "")
+            hdrs = {"Content-Type": "application/json"}
+            if csrf:
+                hdrs["X-XSRF-TOKEN"] = csrf
+
             resp = self.s.post(
-                f"{BASE_URL}/api/auth/sessions",
-                headers=self._hdrs(), timeout=20,
+                f"{BASE_URL}/api/auth/sessions", headers=hdrs, timeout=20,
             )
             if resp.status_code != 200:
                 return False
             self.session_id = resp.json().get("id", "")
             if not self.session_id:
                 return False
-            logger.info(f"  Session ID: {self.session_id}")
+            logger.info(f"  备用 Session ID: {self.session_id}")
 
-            # 提交邮箱（用 login 而不是 signup）
-            for endpoint_suffix in ("email/login", "email/restore-password", "email/forgot-password"):
-                r = self.s.post(
-                    f"{BASE_URL}/api/auth/sessions/{self.session_id}/{endpoint_suffix}",
-                    headers=self._hdrs(),
+            for suffix in ("email/login",):
+                r2 = self.s.post(
+                    f"{BASE_URL}/api/auth/sessions/{self.session_id}/{suffix}",
+                    headers=hdrs,
                     json={"email": email},
                     timeout=20,
                 )
-                logger.info(f"  /{endpoint_suffix}: HTTP {r.status_code}")
-                if r.status_code in (200, 204):
+                logger.info(f"  /{suffix}: HTTP {r2.status_code}")
+                if r2.status_code in (200, 204):
                     return True
-                if r.status_code == 404:
-                    continue
         except Exception as e:
-            logger.warning(f"  session 方式失败: {e}")
+            logger.warning(f"  备用 session 方式失败: {e}")
         return False
 
     # ── Step B：完成密码重置（通过重置链接） ──
 
     def complete_reset_via_link(self, reset_link: str, new_password: str) -> bool:
-        """访问重置链接并提交新密码。"""
-        # 1. 访问重置链接，获取 token
+        """
+        访问 JetBrains 密码重置链接，解析表单并提交新密码。
+        JetBrains 重置链接格式：/reset-password?token=...
+        提交接口通常是同页面的 POST，包含 _st CSRF token。
+        """
         try:
-            resp = self.s.get(reset_link, timeout=30, allow_redirects=True)
-            logger.info(f"  访问重置链接: HTTP {resp.status_code}, 最终URL: {str(resp.url)[:80]}")
+            # 1. 访问重置链接，加载带表单的页面
+            resp = self.s.get(
+                reset_link, timeout=30, allow_redirects=True,
+                headers=self._browser_headers(),
+            )
+            final_url = str(resp.url)
+            logger.info(f"  访问重置链接: HTTP {resp.status_code}, URL: {final_url[:80]}")
+
+            # 如果被重定向到 /login，说明 token 无效或已过期
+            if "/login" in final_url and "reset" not in final_url:
+                logger.warning("  重置链接已失效或 token 无效（重定向到 /login）")
+                return False
+
         except Exception as e:
             logger.warning(f"  访问重置链接失败: {e}")
             return False
 
-        # 从 URL 参数中提取 token
-        final_url = str(resp.url)
-        parsed = urlparse(final_url)
-        qs = parse_qs(parsed.query)
-        token = (qs.get("token") or qs.get("reset_token") or [""])[0]
+        html = resp.text
 
-        # 也尝试从原始链接提取
-        if not token:
-            orig_parsed = urlparse(reset_link)
-            orig_qs = parse_qs(orig_parsed.query)
-            token = (orig_qs.get("token") or orig_qs.get("reset_token") or [""])[0]
+        # 2. 从 HTML 中提取表单 action（含新的 _st CSRF token）
+        form_action = None
+        action_match = re.search(r'action="(/[^"]*(?:reset[^"]*password|password[^"]*reset)[^"]*)"', html, re.I)
+        if not action_match:
+            # 也可能是同 URL
+            action_match = re.search(r'action="(/reset-password[^"]*)"', html)
+        if action_match:
+            form_action = f"{BASE_URL}{action_match.group(1)}"
+            logger.info(f"  表单 action: {form_action[:80]}")
 
-        if not token:
-            # 尝试从页面 HTML 中提取 token（hidden input 或 JS 变量）
-            html = resp.text
-            m = re.search(r'"token"\s*:\s*"([^"]{8,})"', html)
-            if m:
-                token = m.group(1)
+        # 如果找不到 form action，用原始 URL 构造
+        if not form_action:
+            # 从当前页面获取新的 _st token
+            st_match = re.search(r'_st=([^"&\s]+)', html)
+            new_st = st_match.group(1) if st_match else ""
+            form_action = final_url
+            if new_st and "?" in form_action:
+                form_action = re.sub(r'_st=[^&]+', f'_st={new_st}', form_action)
+            logger.info(f"  推断表单 action: {form_action[:80]}")
 
-        logger.info(f"  重置 token: {token[:20] if token else '未找到'}...")
+        # 3. 从 HTML 找所有 input 字段名（适配不同版本的表单字段名）
+        input_names = re.findall(r'<input[^>]+name="([^"]+)"', html)
+        logger.info(f"  表单字段: {input_names}")
 
-        # 2. 提交新密码
-        self.csrf = self.s.cookies.get("_st-JBA", self.csrf)
+        # 构造表单数据（兼容 password/confirmPassword 或 newPassword/confirmNewPassword）
+        form_data: dict[str, str] = {}
+        for name in input_names:
+            nl = name.lower()
+            if "confirm" in nl:
+                form_data[name] = new_password
+            elif "password" in nl or "pwd" in nl:
+                form_data[name] = new_password
+            else:
+                # hidden fields (token, _csrf 等) 从 html 提取 value
+                val_match = re.search(
+                    rf'<input[^>]+name="{re.escape(name)}"[^>]+value="([^"]*)"', html
+                )
+                if not val_match:
+                    val_match = re.search(
+                        rf'<input[^>]+value="([^"]*)"[^>]+name="{re.escape(name)}"', html
+                    )
+                form_data[name] = val_match.group(1) if val_match else ""
 
-        reset_candidates = [
-            (f"{BASE_URL}/api/auth/restore-password/confirm",
-             {"token": token, "password": new_password}),
-            (f"{BASE_URL}/api/auth/reset-password",
-             {"token": token, "password": new_password}),
-            (f"{BASE_URL}/api/auth/reset-password",
-             {"token": token, "newPassword": new_password}),
-            (f"{BASE_URL}/api/account/password/reset",
-             {"token": token, "password": new_password}),
-        ]
+        if not any("password" in k.lower() or "pwd" in k.lower() for k in form_data):
+            # 兜底：最常见的字段组合
+            form_data.update({"password": new_password, "confirmPassword": new_password})
 
-        for url, body in reset_candidates:
-            if not token and "token" in body:
-                continue
-            try:
-                r = self.s.post(url, headers=self._hdrs(), json=body, timeout=20)
-                logger.info(f"  {url}: HTTP {r.status_code}")
-                if r.status_code in (200, 204):
-                    logger.info("  ✓ 密码重置成功")
-                    return True
-                if r.status_code == 404:
-                    continue
-            except Exception as e:
-                logger.warning(f"  {url} 异常: {e}")
-                continue
+        logger.info(f"  提交表单字段: {list(form_data.keys())}")
 
-        # 如果无法通过 API 完成，尝试提交 HTML 表单
-        return self._complete_via_form(final_url, token, new_password)
-
-    def _complete_via_form(self, page_url: str, token: str, new_password: str) -> bool:
-        """备用：提交 HTML 表单形式的密码重置。"""
+        # 4. POST 提交新密码
         try:
-            form_data = {
-                "_csrf": self.csrf,
-                "token": token,
-                "password": new_password,
-                "confirmPassword": new_password,
-            }
-            resp = self.s.post(
-                page_url, data=form_data, timeout=20,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            r2 = self.s.post(
+                form_action,
+                data=form_data,
+                headers={
+                    **self._browser_headers(),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": final_url,
+                },
+                timeout=30,
+                allow_redirects=True,
             )
-            logger.info(f"  表单提交: HTTP {resp.status_code}")
-            return resp.status_code in (200, 302)
+            logger.info(f"  POST 新密码: HTTP {r2.status_code}, URL: {str(r2.url)[:80]}")
+
+            # 成功通常是 200（成功页面）或 302 重定向到 login/profile
+            if r2.status_code in (200, 302):
+                final = str(r2.url)
+                # 如果重定向到 login 或成功提示，视为成功
+                if "login" in final or "success" in final or "profile" in final or r2.status_code == 200:
+                    # 检查页面是否包含错误提示
+                    error_match = re.search(
+                        r'(?:error|invalid|expired|failed)[^<]{0,50}', r2.text, re.I
+                    )
+                    if error_match and "password" in r2.text.lower():
+                        logger.warning(f"  页面含错误: {error_match.group(0)}")
+                        return False
+                    logger.info("  ✓ 密码重置表单提交成功")
+                    return True
         except Exception as e:
-            logger.warning(f"  表单提交失败: {e}")
-            return False
+            logger.warning(f"  POST 新密码失败: {e}")
+
+        return False
 
     # ── Step B2：完成密码重置（通过 OTP 验证码 + session） ──
 
@@ -319,10 +397,11 @@ class JBPasswordResetter:
         """用 OTP 验证码完成登录，然后修改密码。"""
         if not self.session_id:
             return False
+        json_hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
         try:
             r = self.s.post(
                 f"{BASE_URL}/api/auth/sessions/{self.session_id}/otp/email",
-                headers=self._hdrs(),
+                headers=json_hdrs,
                 json={"oneTimePassword": otp},
                 timeout=20,
             )
@@ -331,7 +410,9 @@ class JBPasswordResetter:
                 return False
 
             # 获取认证 token/cookie 后改密
-            self.csrf = self.s.cookies.get("_st-JBA", self.csrf)
+            csrf = self.s.cookies.get("_st-JBA", "")
+            if csrf:
+                json_hdrs["X-XSRF-TOKEN"] = csrf
             change_candidates = [
                 (f"{BASE_URL}/api/auth/sessions/{self.session_id}/password/change",
                  {"newPassword": new_password}),
@@ -339,7 +420,7 @@ class JBPasswordResetter:
                  {"newPassword": new_password}),
             ]
             for url, body in change_candidates:
-                cr = self.s.post(url, headers=self._hdrs(), json=body, timeout=20)
+                cr = self.s.post(url, headers=json_hdrs, json=body, timeout=20)
                 logger.info(f"  改密 {url}: HTTP {cr.status_code}")
                 if cr.status_code in (200, 204):
                     return True
@@ -354,7 +435,7 @@ def reset_account_password(
     email: str,
     new_password: str,
     progress_cb=None,
-    poll_timeout: float = 120,
+    poll_timeout: float = 300,
 ) -> dict:
     """
     完整重置流程:
@@ -422,8 +503,12 @@ def reset_account_password(
         logger.exception(f"[{email}] 改密流程异常")
         return {"ok": False, "error": f"改密流程异常: {e}"}
     finally:
-        # 清理临时邮箱
+        # 清理临时邮箱（同时清除持久化 token 缓存）
         try:
             delete_email(email)
+        except Exception:
+            pass
+        try:
+            _remove_from_token_cache(email)
         except Exception:
             pass
