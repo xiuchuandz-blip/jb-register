@@ -111,11 +111,19 @@ def apply_email_exact(local_part: str, domain: str) -> str:
 # ── 邮件内容解析 ──
 
 def extract_reset_link(content: str) -> str | None:
-    """从邮件内容中提取 JetBrains 密码重置链接。"""
+    """
+    从邮件内容中提取 JetBrains 密码重置链接。
+    JetBrains 实际格式: /reset-password/<token> （路径参数，不是查询参数）
+    """
     patterns = [
-        r'https://account\.jetbrains\.com/[^\s"\'<>\)]*(?:reset[_-]?password|restore[_-]?password|confirm|password)[^\s"\'<>\)]*token=[^\s"\'<>\)]+',
+        # 主要格式：路径参数 /reset-password/TOKEN（无查询字符串）
+        r'https://account\.jetbrains\.com/reset-password/[A-Za-z0-9_\-]+',
+        # 兼容：查询参数格式 /reset-password?token=TOKEN
         r'https://account\.jetbrains\.com/reset-password\?[^\s"\'<>\)]+',
+        # 兼容：restore-password 路径
+        r'https://account\.jetbrains\.com/restore-password/[A-Za-z0-9_\-]+',
         r'https://account\.jetbrains\.com/restore-password\?[^\s"\'<>\)]+',
+        # 兼容：confirm 路径
         r'https://account\.jetbrains\.com/confirm\?[^\s"\'<>\)]+',
     ]
     for pattern in patterns:
@@ -310,35 +318,37 @@ class JBPasswordResetter:
 
         # 2. 从 HTML 中提取表单 action（含新的 _st CSRF token）
         form_action = None
-        action_match = re.search(r'action="(/[^"]*(?:reset[^"]*password|password[^"]*reset)[^"]*)"', html, re.I)
-        if not action_match:
-            # 也可能是同 URL
-            action_match = re.search(r'action="(/reset-password[^"]*)"', html)
+        # JetBrains 实际 form action: /password-reset?code=TOKEN&_st=CSRF（HTML 编码为 &amp;）
+        action_match = re.search(r'action="(/[^"]+)"', html)
         if action_match:
-            form_action = f"{BASE_URL}{action_match.group(1)}"
-            logger.info(f"  表单 action: {form_action[:80]}")
+            raw_action = action_match.group(1)
+            # 解码 HTML 实体（&amp; → &）
+            import html as html_lib
+            decoded_action = html_lib.unescape(raw_action)
+            form_action = f"{BASE_URL}{decoded_action}"
+            logger.info(f"  表单 action: {form_action[:100]}")
 
-        # 如果找不到 form action，用原始 URL 构造
+        # 如果找不到 form action，用当前 URL 作为 fallback
         if not form_action:
-            # 从当前页面获取新的 _st token
-            st_match = re.search(r'_st=([^"&\s]+)', html)
-            new_st = st_match.group(1) if st_match else ""
             form_action = final_url
-            if new_st and "?" in form_action:
-                form_action = re.sub(r'_st=[^&]+', f'_st={new_st}', form_action)
             logger.info(f"  推断表单 action: {form_action[:80]}")
 
         # 3. 从 HTML 找所有 input 字段名（适配不同版本的表单字段名）
         input_names = re.findall(r'<input[^>]+name="([^"]+)"', html)
         logger.info(f"  表单字段: {input_names}")
 
-        # 构造表单数据（兼容 password/confirmPassword 或 newPassword/confirmNewPassword）
+        # 构造表单数据
+        # JetBrains 实际字段: password + pass2（confirm 字段叫 pass2）
         form_data: dict[str, str] = {}
         for name in input_names:
             nl = name.lower()
-            if "confirm" in nl:
-                form_data[name] = new_password
-            elif "password" in nl or "pwd" in nl:
+            is_pw_field = (
+                "password" in nl
+                or "pwd" in nl
+                or nl.startswith("pass")   # pass2, passwd, etc.
+                or nl in ("pass", "pw")
+            )
+            if is_pw_field:
                 form_data[name] = new_password
             else:
                 # hidden fields (token, _csrf 等) 从 html 提取 value
@@ -351,9 +361,9 @@ class JBPasswordResetter:
                     )
                 form_data[name] = val_match.group(1) if val_match else ""
 
-        if not any("password" in k.lower() or "pwd" in k.lower() for k in form_data):
-            # 兜底：最常见的字段组合
-            form_data.update({"password": new_password, "confirmPassword": new_password})
+        if not form_data:
+            # 兜底：JetBrains 最常见字段
+            form_data = {"password": new_password, "pass2": new_password}
 
         logger.info(f"  提交表单字段: {list(form_data.keys())}")
 

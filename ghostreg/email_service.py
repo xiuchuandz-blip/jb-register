@@ -137,18 +137,30 @@ def apply_email(username: str | None = None, max_retries: int = 3) -> str:
 _account_cache: dict[str, dict] = {}
 
 
+def _make_auth_headers(email: str) -> dict:
+    """
+    返回读取邮件所需的认证头。
+    优先使用邮箱专属 token；若无缓存，降级使用全局 API Key（API Key 支持 address 参数）。
+    """
+    cache = _account_cache.get(email)
+    if cache and cache.get("token"):
+        return {"Authorization": f"Bearer {cache['token']}"}
+    # 降级：用全局 API Key（避免因 app 重启丢失 token 导致无法读邮件）
+    try:
+        api_key = _get_api_key()
+        return {"X-API-Key": api_key}
+    except Exception:
+        raise RuntimeError(f"邮箱 {email} 无可用认证凭据（无 token 且 API Key 未配置）")
+
+
 def get_mails(email: str) -> list[dict]:
     """
     获取指定邮箱的所有邮件（含完整正文）。
     YYDS Mail 的 GET /v1/messages 列表接口不含正文，
     需要对每封邮件调 GET /v1/messages/{id} 获取 html/text。
+    支持 token（优先）或 API Key（降级备用）认证。
     """
-    cache = _account_cache.get(email)
-    if not cache:
-        raise RuntimeError(f"邮箱 {email} 未通过 apply_email 创建，无法获取邮件")
-
-    token = cache["token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = _make_auth_headers(email)
 
     # 1. 获取邮件列表（用 address 参数，API 文档要求）
     client = _new_client()
@@ -170,11 +182,11 @@ def get_mails(email: str) -> list[dict]:
         msg_id = msg.get("id")
         if msg_id and "content" not in msg:
             try:
-                detail = _fetch_message_detail(msg_id, email, token)
+                detail = _fetch_message_detail(msg_id, email, headers)
                 # html 可能是数组，拼成字符串
                 html = detail.get("html", "")
                 if isinstance(html, list):
-                    html = "".join(html)
+                    html = "".join(str(h) for h in html)
                 text = detail.get("text", "")
                 msg["html"] = html
                 msg["text"] = text
@@ -186,14 +198,14 @@ def get_mails(email: str) -> list[dict]:
     return messages
 
 
-def _fetch_message_detail(msg_id: str, email: str, token: str) -> dict:
+def _fetch_message_detail(msg_id: str, email: str, headers: dict) -> dict:
     """获取单封邮件完整详情（含 html/text 正文）"""
     client = _new_client()
     try:
         resp = client.get(
             f"{config.YYDS_API_BASE}/messages/{msg_id}",
             params={"address": email},
-            headers={"Authorization": f"Bearer {token}"},
+            headers=headers,
         )
         resp.raise_for_status()
         result = resp.json()
