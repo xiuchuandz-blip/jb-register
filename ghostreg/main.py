@@ -19,12 +19,12 @@ def main():
         description="GhostReg — JetBrains 账号半自动注册机",
     )
     parser.add_argument(
-        "--port", type=int, default=7860,
-        help="Web 控制面板端口 (默认: 7860)",
+        "--port", type=int, default=5000,
+        help="Web 控制面板端口 (默认: 5000)",
     )
     parser.add_argument(
-        "--host", type=str, default="127.0.0.1",
-        help="监听地址 (默认: 127.0.0.1)",
+        "--host", type=str, default="0.0.0.0",
+        help="监听地址 (默认: 0.0.0.0)",
     )
     parser.add_argument(
         "--no-browser", action="store_true",
