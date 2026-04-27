@@ -594,6 +594,7 @@
         <span>协议注册历史（永久保存）</span>
         <div style="display:flex;gap:8px" id="protoHistoryActions">
           <button class="btn btn-secondary btn-small" onclick="protoToggleSelectAll()" id="btnProtoSelectAll" style="display:none">全选</button>
+          <button class="btn btn-secondary btn-small" onclick="protoResetSelected()" id="btnProtoResetSelected" style="display:none;border-color:var(--warning);color:var(--warning)">批量改密</button>
           <button class="btn btn-secondary btn-small" onclick="protoDeleteSelected()" id="btnProtoDeleteSelected" style="display:none;border-color:var(--error);color:var(--error)">删除选中</button>
         </div>
       </div>
@@ -1735,19 +1736,22 @@ function renderProtoHistory() {
   }
   btnSelect.style.display = '';
   btnDelete.style.display = '';
+  document.getElementById('btnProtoResetSelected').style.display = 'none';
   let html = '<table class="history-table"><thead><tr><th style="width:32px"><input type="checkbox" id="protoCheckAll" onchange="protoOnCheckAll(this)"></th><th>#</th><th>邮箱</th><th>密码</th><th>耗时</th><th>时间</th><th></th></tr></thead><tbody>';
   for (let i=0; i<protoHistoryData.length; i++) {
     const h = protoHistoryData[i];
     const idx = i;
+    const emailEsc = esc(h.email||'');
     html += `<tr>
-      <td><input type="checkbox" class="proto-hist-check" value="${idx}" onchange="protoOnCheckChange()"></td>
+      <td><input type="checkbox" class="proto-hist-check" value="${idx}" data-email="${emailEsc}" onchange="protoOnCheckChange()"></td>
       <td style="color:var(--muted)">${i+1}</td>
-      <td class="mono">${esc(h.email||'')}</td>
+      <td class="mono">${emailEsc}</td>
       <td class="mono">${esc(h.password||'')}</td>
       <td style="color:var(--muted);font-size:12px">${h.elapsed ? h.elapsed+'s' : ''}</td>
       <td style="color:var(--muted);font-size:12px">${esc(h.timestamp||'')}</td>
       <td>
-        <button class="copy-btn" onclick="copyRow('${esc(h.email||'')}','${esc(h.password||'')}')">复制</button>
+        <button class="copy-btn" onclick="copyRow('${emailEsc}','${esc(h.password||'')}')">复制</button>
+        <button class="copy-btn" onclick="protoResetSingle('${emailEsc}')" style="margin-left:4px;border-color:var(--warning);color:var(--warning)">改密</button>
         <button class="copy-btn" onclick="protoDeleteSingle(${idx})" style="margin-left:4px;border-color:var(--error);color:var(--error)">删除</button>
       </td>
     </tr>`;
@@ -1761,7 +1765,25 @@ function protoOnCheckAll(el) {
 }
 function protoOnCheckChange() {
   const checked = document.querySelectorAll('.proto-hist-check:checked');
-  document.getElementById('btnProtoDeleteSelected').textContent = checked.length > 0 ? `删除选中 (${checked.length})` : '删除选中';
+  const n = checked.length;
+  document.getElementById('btnProtoDeleteSelected').textContent = n > 0 ? `删除选中 (${n})` : '删除选中';
+  const btnReset = document.getElementById('btnProtoResetSelected');
+  if (btnReset) {
+    btnReset.style.display = n > 0 ? '' : 'none';
+    btnReset.textContent = n > 0 ? `批量改密 (${n})` : '批量改密';
+  }
+}
+
+function protoResetSingle(email) {
+  openResetModal([email]);
+}
+
+function protoResetSelected() {
+  const checks = document.querySelectorAll('.proto-hist-check:checked');
+  if (!checks.length) { alert('请先勾选要改密的账号'); return; }
+  const emails = Array.from(checks).map(c => c.dataset.email).filter(Boolean);
+  if (!emails.length) { alert('所选账号无邮箱信息'); return; }
+  openResetModal(emails);
 }
 function protoToggleSelectAll() {
   const checkAll = document.getElementById('protoCheckAll');
