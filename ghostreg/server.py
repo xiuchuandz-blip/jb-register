@@ -1297,3 +1297,117 @@ def _run_proto_batch(count: int, password: str, workers: int,
         "tasks": proto_state.tasks,
         "history": proto_history_list,
     })
+
+
+# ══════════════════════════════════════════════════════
+#  改密功能 — 通过邮箱找回并重置 JetBrains 账号密码
+# ══════════════════════════════════════════════════════
+
+# 改密任务全局状态
+_reset_tasks: dict[str, dict] = {}   # email → {status, message, ok}
+_reset_running = False
+
+
+class ResetPasswordRequest(BaseModel):
+    emails: list[str]          # 要改密的邮箱列表
+    new_password: str          # 新密码
+    poll_timeout: int = 120    # 等待重置邮件的超时秒数（默认 2 分钟）
+
+
+@app.post("/api/reset-password")
+async def reset_password_batch(req: ResetPasswordRequest):
+    """批量通过邮箱改密接口"""
+    global _reset_running, _reset_tasks
+
+    if _reset_running:
+        return {"ok": False, "error": "已有改密任务在运行，请等待完成"}
+
+    if not req.emails:
+        return {"ok": False, "error": "未指定任何邮箱"}
+
+    if not req.new_password or len(req.new_password) < 8:
+        return {"ok": False, "error": "新密码长度至少 8 位"}
+
+    _reset_running = True
+    _reset_tasks = {}
+    for email in req.emails:
+        _reset_tasks[email] = {"email": email, "status": "pending", "message": "等待中", "ok": None}
+
+    _broadcast_from_thread({"type": "reset_started", "tasks": _reset_tasks})
+
+    thread = threading.Thread(
+        target=_run_reset_batch,
+        args=(req.emails, req.new_password, req.poll_timeout),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "count": len(req.emails)}
+
+
+@app.get("/api/reset-status")
+async def reset_status():
+    return {"running": _reset_running, "tasks": _reset_tasks}
+
+
+def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
+    """后台线程：逐个执行改密任务"""
+    global _reset_running, _reset_tasks
+
+    from .reset_password import reset_account_password
+
+    def _progress(info: dict):
+        email = info.get("email", "")
+        if email in _reset_tasks:
+            _reset_tasks[email]["message"] = info.get("message", "")
+            _reset_tasks[email]["status"] = "running"
+        _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
+
+    for email in emails:
+        _reset_tasks[email]["status"] = "running"
+        _reset_tasks[email]["message"] = "正在处理..."
+        _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
+
+        result = reset_account_password(
+            email=email,
+            new_password=new_password,
+            progress_cb=_progress,
+            poll_timeout=float(poll_timeout),
+        )
+
+        _reset_tasks[email]["ok"] = result.get("ok")
+        _reset_tasks[email]["status"] = "done" if result.get("ok") else "failed"
+        _reset_tasks[email]["message"] = result.get("message") or result.get("error") or ""
+        _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
+
+        # 每个账号间稍微间隔，避免过快触发速率限制
+        time.sleep(3)
+
+    _reset_running = False
+    _broadcast_from_thread({"type": "reset_completed", "tasks": _reset_tasks})
+
+    # 改密成功的账号，更新 history 中的密码
+    _apply_reset_to_history(emails, new_password)
+
+
+def _apply_reset_to_history(emails: list[str], new_password: str):
+    """将改密成功的账号更新到 history 记录中"""
+    success_emails = {e for e, t in _reset_tasks.items() if t.get("ok")}
+    if not success_emails:
+        return
+
+    changed = False
+    with _file_lock:
+        for h in state.history:
+            if h.get("email") in success_emails:
+                h["password"] = new_password
+                changed = True
+        if changed:
+            ACCOUNTS_JSON.write_text(
+                json.dumps(state.history, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+    if changed:
+        _broadcast_from_thread({"type": "history_update", "history": state.history})
+        logger.info(f"已更新 history 中 {len(success_emails)} 个账号的密码记录")

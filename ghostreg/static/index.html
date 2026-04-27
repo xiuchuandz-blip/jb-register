@@ -80,6 +80,24 @@
   .history-table .mono { font-family:Consolas,monospace; font-size:13px; }
   .copy-btn { background:none; border:1px solid var(--border); color:var(--muted); padding:2px 8px; border-radius:4px; cursor:pointer; font-size:11px; }
   .copy-btn:hover { color:var(--text); border-color:var(--muted); }
+  /* 改密弹窗 */
+  .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:1000; align-items:center; justify-content:center; }
+  .modal-overlay.active { display:flex; }
+  .modal-box { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:28px; width:460px; max-width:95vw; }
+  .modal-title { font-size:16px; font-weight:700; margin-bottom:16px; }
+  .modal-footer { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+  /* 改密进度 */
+  .reset-progress { margin-top:16px; }
+  .reset-item { display:flex; align-items:center; gap:10px; padding:8px 12px; border-radius:8px; font-size:13px; margin-bottom:6px; background:var(--bg); border:1px solid var(--border); }
+  .reset-item.running { border-color:var(--accent); }
+  .reset-item.done { border-color:var(--success); }
+  .reset-item.failed { border-color:var(--error); }
+  .reset-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:var(--muted); }
+  .reset-dot.running { background:var(--accent); animation:pulse 1.5s infinite; }
+  .reset-dot.done { background:var(--success); }
+  .reset-dot.failed { background:var(--error); }
+  .reset-email { font-family:Consolas,monospace; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .reset-msg { color:var(--muted); font-size:11px; flex-shrink:0; max-width:160px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 </style>
 </head>
 <body>
@@ -351,6 +369,7 @@
       <span>已注册账号（永久保存）</span>
       <div style="display:flex;gap:8px" id="historyActions">
         <button class="btn btn-secondary btn-small" onclick="toggleSelectAll()" id="btnSelectAll" style="display:none">全选</button>
+        <button class="btn btn-secondary btn-small" onclick="resetSelectedPasswords()" id="btnResetSelected" style="display:none;border-color:var(--warning);color:var(--warning)">批量改密</button>
         <button class="btn btn-secondary btn-small" onclick="deleteSelected()" id="btnDeleteSelected" style="display:none;border-color:var(--error);color:var(--error)">删除选中</button>
       </div>
     </div>
@@ -363,6 +382,36 @@
   </div>
 
   </div><!-- /tab-browser -->
+
+  <!-- ═══ 改密弹窗 ═══ -->
+  <div class="modal-overlay" id="resetModal" onclick="if(event.target===this)closeResetModal()">
+    <div class="modal-box">
+      <div class="modal-title">🔑 通过邮箱更改密码</div>
+      <div id="resetTargetInfo" style="font-size:12px;color:var(--muted);margin-bottom:14px"></div>
+      <div id="resetFormArea">
+        <div class="form-group" style="margin-bottom:14px">
+          <label>新密码（至少8位）</label>
+          <input type="password" id="resetNewPwd" placeholder="输入新密码" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;outline:none">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>等待邮件超时（秒）</label>
+          <input type="number" id="resetTimeout" value="120" min="30" max="300" style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px;outline:none">
+          <div class="form-hint" style="margin-top:4px">JetBrains 会向注册邮箱发送重置链接，建议梯子环境下适当加长超时</div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:12px;padding:8px 12px;background:rgba(99,102,241,.06);border-radius:8px;border:1px solid var(--border);line-height:1.7">
+          <strong style="color:var(--accent)">工作原理：</strong>系统会重新创建注册时使用的临时邮箱地址，然后向 JetBrains 请求发送密码重置邮件，自动读取邮件中的重置链接并完成密码修改。
+        </div>
+      </div>
+      <div id="resetProgressArea" style="display:none">
+        <div class="reset-progress" id="resetProgressList"></div>
+        <div id="resetSummary" style="margin-top:12px;font-size:13px;text-align:right;color:var(--muted)"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeResetModal()" id="btnResetCancel">取消</button>
+        <button class="btn btn-primary" onclick="startResetPassword()" id="btnResetStart">开始改密</button>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══ Tab 2: 协议注册机 ═══ -->
   <div class="tab-page" id="tab-protocol">
@@ -635,6 +684,9 @@ function handleMessage(msg) {
     history = msg.history || [];
     renderHistory();
   }
+  else if (msg.type === 'reset_started' || msg.type === 'reset_update' || msg.type === 'reset_completed') {
+    handleResetMessage(msg);
+  }
 }
 
 function renderTasks() {
@@ -684,10 +736,11 @@ function renderHistory() {
       <td><input type="checkbox" class="hist-check" value="${h.id}" onchange="onCheckChange()"></td>
       <td style="color:var(--muted)">${h.id}</td>
       <td class="mono">${esc(h.email)}</td>
-      <td class="mono">${esc(h.password)}</td>
+      <td class="mono" id="pw-${h.id}">${esc(h.password)}</td>
       <td style="color:var(--muted);font-size:12px">${esc(h.time||'')}</td>
-      <td>
+      <td style="white-space:nowrap">
         <button class="copy-btn" onclick="copyRow('${esc(h.email)}','${esc(h.password)}')">复制</button>
+        <button class="copy-btn" onclick="openResetModal(['${esc(h.email)}'])" style="margin-left:4px;border-color:var(--warning);color:var(--warning)">改密</button>
         <button class="copy-btn" onclick="deleteSingle(${h.id})" style="margin-left:4px;border-color:var(--error);color:var(--error)">删除</button>
       </td>
     </tr>`;
@@ -954,8 +1007,10 @@ function onCheckAll(el) {
 
 function onCheckChange() {
   const checked = document.querySelectorAll('.hist-check:checked');
-  const btn = document.getElementById('btnDeleteSelected');
-  btn.textContent = checked.length > 0 ? `删除选中 (${checked.length})` : '删除选中';
+  const n = checked.length;
+  document.getElementById('btnDeleteSelected').textContent = n > 0 ? `删除选中 (${n})` : '删除选中';
+  document.getElementById('btnResetSelected').style.display = n > 0 ? '' : 'none';
+  document.getElementById('btnResetSelected').textContent = n > 0 ? `批量改密 (${n})` : '批量改密';
 }
 
 function toggleSelectAll() {
@@ -997,6 +1052,125 @@ async function _doDelete(ids) {
     }
   } catch(e) {
     alert('删除失败: ' + e.message);
+  }
+}
+
+// ── 改密功能 ──
+
+let _resetEmails = [];
+
+function openResetModal(emails) {
+  _resetEmails = emails;
+  const info = document.getElementById('resetTargetInfo');
+  if (emails.length === 1) {
+    info.textContent = `目标账号: ${emails[0]}`;
+  } else {
+    info.textContent = `共 ${emails.length} 个账号将被改密`;
+  }
+  document.getElementById('resetFormArea').style.display = '';
+  document.getElementById('resetProgressArea').style.display = 'none';
+  document.getElementById('btnResetStart').disabled = false;
+  document.getElementById('btnResetStart').textContent = '开始改密';
+  document.getElementById('btnResetCancel').textContent = '取消';
+  document.getElementById('resetModal').classList.add('active');
+}
+
+function closeResetModal() {
+  if (document.getElementById('btnResetStart').disabled &&
+      document.getElementById('btnResetCancel').textContent === '关闭') {
+    // 改密完成后关闭不需要确认
+    document.getElementById('resetModal').classList.remove('active');
+    return;
+  }
+  document.getElementById('resetModal').classList.remove('active');
+}
+
+function resetSelectedPasswords() {
+  const checks = document.querySelectorAll('.hist-check:checked');
+  if (!checks.length) { alert('请先勾选要改密的账号'); return; }
+  const ids = Array.from(checks).map(c => parseInt(c.value));
+  const emails = history.filter(h => ids.includes(h.id)).map(h => h.email);
+  openResetModal(emails);
+}
+
+async function startResetPassword() {
+  const pwd = document.getElementById('resetNewPwd').value.trim();
+  if (!pwd || pwd.length < 8) { alert('请输入至少 8 位的新密码'); return; }
+  const timeout = parseInt(document.getElementById('resetTimeout').value) || 120;
+
+  document.getElementById('btnResetStart').disabled = true;
+  document.getElementById('btnResetStart').textContent = '改密中...';
+  document.getElementById('resetFormArea').style.display = 'none';
+  document.getElementById('resetProgressArea').style.display = '';
+
+  // 初始化进度列表
+  renderResetProgress({});
+
+  try {
+    const resp = await fetch('/api/reset-password', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ emails: _resetEmails, new_password: pwd, poll_timeout: timeout }),
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      alert(data.error || '启动改密失败');
+      document.getElementById('btnResetStart').disabled = false;
+      document.getElementById('btnResetStart').textContent = '开始改密';
+      document.getElementById('resetFormArea').style.display = '';
+      document.getElementById('resetProgressArea').style.display = 'none';
+    }
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+    document.getElementById('btnResetStart').disabled = false;
+  }
+}
+
+let _resetTasks = {};
+
+function renderResetProgress(tasks) {
+  _resetTasks = tasks;
+  const list = document.getElementById('resetProgressList');
+  const emails = _resetEmails.length ? _resetEmails : Object.keys(tasks);
+  let html = '';
+  for (const email of emails) {
+    const t = tasks[email] || { status: 'pending', message: '等待中' };
+    const cls = t.status === 'done' ? 'done' : t.status === 'failed' ? 'failed' : t.status === 'running' ? 'running' : '';
+    const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '✗' : '…';
+    html += `<div class="reset-item ${cls}">
+      <div class="reset-dot ${cls}"></div>
+      <div class="reset-email" title="${esc(email)}">${esc(email)}</div>
+      <div class="reset-msg" title="${esc(t.message||'')}">${esc(t.message||t.status||'')}</div>
+    </div>`;
+  }
+  list.innerHTML = html || '<div style="color:var(--muted);font-size:13px">准备中...</div>';
+
+  // 汇总
+  const vals = Object.values(tasks);
+  const done = vals.filter(t=>t.ok===true).length;
+  const failed = vals.filter(t=>t.ok===false).length;
+  const total = _resetEmails.length;
+  if (total > 0) {
+    document.getElementById('resetSummary').textContent =
+      `成功 ${done} / 失败 ${failed} / 共 ${total}`;
+  }
+}
+
+function handleResetMessage(msg) {
+  if (msg.type === 'reset_started' || msg.type === 'reset_update') {
+    renderResetProgress(msg.tasks || {});
+  } else if (msg.type === 'reset_completed') {
+    renderResetProgress(msg.tasks || {});
+    document.getElementById('btnResetStart').textContent = '完成';
+    document.getElementById('btnResetCancel').textContent = '关闭';
+    // 如果有成功的，更新本地历史密码显示
+    const tasks = msg.tasks || {};
+    for (const h of history) {
+      const t = tasks[h.email];
+      if (t && t.ok) {
+        // history 会由 WebSocket history_update 刷新
+      }
+    }
   }
 }
 
