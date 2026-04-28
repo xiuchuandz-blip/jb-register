@@ -1391,13 +1391,14 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
 
 
 def _apply_reset_to_history(emails: list[str], new_password: str):
-    """将改密成功的账号更新到 history 记录中"""
+    """将改密成功的账号更新到 history 记录（浏览器+协议）中"""
     success_emails = {e for e, t in _reset_tasks.items() if t.get("ok")}
     if not success_emails:
         return
 
     changed = False
     with _file_lock:
+        # ── 浏览器注册历史 ──
         for h in state.history:
             if h.get("email") in success_emails:
                 h["password"] = new_password
@@ -1408,6 +1409,32 @@ def _apply_reset_to_history(emails: list[str], new_password: str):
                 encoding="utf-8",
             )
 
+        # ── 协议注册历史 ──
+        proto_changed = False
+        try:
+            if PROTO_ACCOUNTS_JSON.exists():
+                proto_records = json.loads(PROTO_ACCOUNTS_JSON.read_text(encoding="utf-8"))
+            else:
+                proto_records = []
+            for r in proto_records:
+                if r.get("email") in success_emails:
+                    r["password"] = new_password
+                    proto_changed = True
+            if proto_changed:
+                PROTO_ACCOUNTS_JSON.write_text(
+                    json.dumps(proto_records, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                import csv as _csv
+                with open(PROTO_ACCOUNTS_CSV, "w", newline="", encoding="utf-8") as f:
+                    w = _csv.writer(f)
+                    w.writerow(["email", "password", "timestamp"])
+                    for r in proto_records:
+                        w.writerow([r.get("email", ""), r.get("password", ""), r.get("timestamp", "")])
+        except Exception as e:
+            logger.warning(f"更新协议账号密码记录失败: {e}")
+
     if changed:
         _broadcast_from_thread({"type": "history_update", "history": state.history})
-        logger.info(f"已更新 history 中 {len(success_emails)} 个账号的密码记录")
+    if changed or proto_changed:
+        logger.info(f"已更新 {len(success_emails)} 个账号的密码记录")
