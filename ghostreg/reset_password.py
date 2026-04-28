@@ -86,10 +86,12 @@ def apply_email_exact(local_part: str, domain: str) -> str:
     if not result.get("success"):
         err_code = result.get("errorCode", "")
         if err_code == "address_already_in_use":
-            raise RuntimeError(
-                f"邮箱 {email} 已被占用且 token 缓存已失效（可能是上次改密任务中途中断）。"
-                f"请等待几分钟后重试，YYDS Mail 会自动释放闲置邮箱地址。"
+            # 邮箱已存在但无 token 缓存 → 降级使用 API Key 直接读取邮件
+            # email_service._make_auth_headers 无 token 时自动走 API Key 路径
+            logger.warning(
+                f"邮箱 {email} 已被占用且无 token 缓存，将使用 API Key 降级读取邮件。"
             )
+            return email
         raise RuntimeError(f"YYDS Mail 创建邮箱失败: {result}")
 
     account = result["data"]
@@ -135,9 +137,26 @@ def extract_reset_link(content: str) -> str | None:
     return None
 
 
-def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5) -> dict:
+def _mail_id_to_timestamp(mail_id: str) -> float:
+    """
+    将 YYDS Mail 邮件 ID（格式 YYYYMMDDTHHMMSS-xxxx）解析为 UTC Unix 时间戳。
+    解析失败时返回 0（视为最老邮件，会被过滤掉）。
+    """
+    import datetime
+    try:
+        # 取 T 前后拼合：20260429T024219
+        dt_part = mail_id.split("-")[0]  # "20260429T024219"
+        dt = datetime.datetime.strptime(dt_part, "%Y%m%dT%H%M%S")
+        return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+    except Exception:
+        return 0.0
+
+
+def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
+                          since: float = 0.0) -> dict:
     """
     轮询邮件箱，寻找 JetBrains 密码重置邮件。
+    since: Unix 时间戳，只处理在此时刻之后到达的邮件（防止匹配历史旧邮件）。
     返回 {"type": "link", "value": url} 或 {"type": "code", "value": "123456"}
     超时则抛出 TimeoutError。
     """
@@ -145,7 +164,7 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5) 
     attempt = 0
     seen_ids: set[str] = set()
 
-    logger.info(f"开始轮询重置邮件: {email} (超时={timeout}s)")
+    logger.info(f"开始轮询重置邮件: {email} (超时={timeout}s, since={since:.0f})")
 
     while time.time() < deadline:
         attempt += 1
@@ -161,6 +180,10 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5) 
             if mid in seen_ids:
                 continue
             seen_ids.add(mid)
+
+            # 过滤：跳过在重置请求发起之前到达的旧邮件
+            if since > 0 and _mail_id_to_timestamp(mid) < since - 5:
+                continue
 
             content = mail.get("content", "") or mail.get("html", "") or mail.get("text", "")
             subject = mail.get("subject", "") or ""
@@ -477,6 +500,7 @@ def reset_account_password(
     try:
         # Step 2: 触发忘记密码
         log("向 JetBrains 请求发送密码重置邮件...", "request_reset")
+        reset_request_time = time.time()  # 记录请求时刻，过滤旧邮件用
         resetter = JBPasswordResetter()
         ok = resetter.request_forgot_password(email)
         if not ok:
@@ -484,8 +508,9 @@ def reset_account_password(
 
         log("重置邮件已请求，等待邮件到达...", "polling")
 
-        # Step 3: 轮询邮件
-        result = poll_email_for_reset(email, timeout=poll_timeout, interval=5)
+        # Step 3: 轮询邮件（只看 reset_request_time 之后到达的新邮件）
+        result = poll_email_for_reset(email, timeout=poll_timeout, interval=5,
+                                      since=reset_request_time)
         log(f"收到重置邮件 (类型: {result['type']})", "got_mail")
 
         # Step 4: 完成重置
