@@ -40,21 +40,27 @@ def new_session(verify: bool = True, worker_url: str = "",
                       传入时自动覆盖 ladder_proxy,内部会转 socks5h:// 走远端 DNS
     """
     if worker_url:
-        # Workers 代理模式:通过 CF Workers /proxy 端点转发请求
-        from ghostreg.proxy_pool import WorkersSession
-        ws = WorkersSession(
-            worker_url=worker_url,
-            ladder_proxy=ladder_proxy,
-            socks5_proxy=socks5_proxy,
-            verify=verify,
-        )
-        # 设置默认 headers(与直连模式一致)
-        ws.headers.update(_BROWSER_HEADERS)
         if socks5_proxy:
-            logger.info(f"[Client] 双层代理模式: SOCKS5={socks5_proxy} → Worker={worker_url}")
+            # 双层代理：SOCKS5 → Worker → JB（旧 WorkersSession 走 /proxy JSON API）
+            from ghostreg.proxy_pool import WorkersSession
+            ws = WorkersSession(
+                worker_url=worker_url,
+                ladder_proxy=ladder_proxy,
+                socks5_proxy=socks5_proxy,
+                verify=verify,
+            )
+            logger.info(f"[Client] 双层代理: SOCKS5={socks5_proxy} → Worker={worker_url}")
         else:
-            logger.info(f"[Client] Workers 代理模式: {worker_url}")
-        return ws  # type: ignore  # WorkersSession 实现了兼容接口
+            # 单层代理：直接 ?__target= 透明转发（兼容简易 Worker 脚本）
+            from ghostreg.proxy_pool import SimpleWorkerSession
+            ws = SimpleWorkerSession(
+                worker_url=worker_url,
+                ladder_proxy=ladder_proxy,
+                verify=verify,
+            )
+            logger.info(f"[Client] 单层 Worker 代理: {worker_url}")
+        ws.headers.update(_BROWSER_HEADERS)
+        return ws  # type: ignore
     
     # 直连模式
     s = Session(

@@ -258,17 +258,28 @@ class WorkersSession:
         ws.post("https://account.jetbrains.com/api/auth/sessions", json={})
     """
     
-    def __init__(self, worker_url: str, ladder_proxy: str = "", verify: bool = False):
+    def __init__(self, worker_url: str, ladder_proxy: str = "",
+                 socks5_proxy: str = "", verify: bool = False):
         from curl_cffi.requests import Session as CurlSession
         
         self.worker_url = worker_url.rstrip("/")
         self.ladder_proxy = ladder_proxy
         
-        # 内部 curl_cffi session 用于连接 Workers（走梯子）
+        # 代理优先级：SOCKS5 > 梯子 > 无
+        if socks5_proxy:
+            # 转为 socks5h:// 让 SOCKS5 服务器做 DNS（避免本机 DNS 泄露）
+            actual_proxy = (socks5_proxy
+                            .replace("socks5://", "socks5h://")
+                            if socks5_proxy.startswith("socks5://")
+                            else f"socks5h://{socks5_proxy}")
+        else:
+            actual_proxy = ladder_proxy or None
+
+        # 内部 curl_cffi session 用于连接 Workers
         self._s = CurlSession(
             impersonate="chrome136",
             verify=verify,
-            proxy=ladder_proxy or None,
+            proxy=actual_proxy,
             timeout=30,
         )
         
@@ -345,6 +356,99 @@ class WorkersSession:
             status_code=inner_status,
             text=inner_body,
             headers=inner_headers,
+            cookies=self.cookies,
+        )
+
+
+class SimpleWorkerSession:
+    """
+    通过 CF Workers ?__target= 透明转发 HTTP 请求。
+
+    适用于用户手动部署的简易 Worker 脚本（无需 /proxy 端点）。
+    与 WorkersSession 不同：直接用查询参数传递目标 URL，Worker 透明转发整个请求。
+    """
+
+    def __init__(self, worker_url: str, ladder_proxy: str = "",
+                 socks5_proxy: str = "", verify: bool = False):
+        from curl_cffi.requests import Session as CurlSession
+        from urllib.parse import quote
+
+        self.worker_url = worker_url.rstrip("/")
+        self._quote = quote
+
+        if socks5_proxy:
+            actual_proxy = (socks5_proxy
+                            .replace("socks5://", "socks5h://")
+                            if socks5_proxy.startswith("socks5://")
+                            else f"socks5h://{socks5_proxy}")
+        else:
+            actual_proxy = ladder_proxy or None
+
+        self._s = CurlSession(
+            impersonate="chrome136",
+            verify=verify,
+            proxy=actual_proxy,
+            timeout=30,
+        )
+        self.cookies = _SimpleCookieJar()
+        self.headers: dict = {}
+
+    def get(self, url: str, **kwargs) -> "_WorkersResponse":
+        return self._request("GET", url, **kwargs)
+
+    def post(self, url: str, **kwargs) -> "_WorkersResponse":
+        return self._request("POST", url, **kwargs)
+
+    def _request(self, method: str, url: str, **kwargs) -> "_WorkersResponse":
+        import json as _json
+
+        # 合并 headers（含 Cookie）
+        req_headers = {**self.headers}
+        if "headers" in kwargs:
+            req_headers.update(kwargs.pop("headers"))
+        cookie_str = self.cookies.to_header()
+        if cookie_str:
+            req_headers["Cookie"] = cookie_str
+
+        # 构建 Worker URL：?__target=<encoded_jb_url>
+        worker_req_url = f"{self.worker_url}?__target={self._quote(url, safe='')}"
+
+        # 处理请求体
+        json_data = kwargs.pop("json", None)
+        data = kwargs.pop("data", None)
+
+        try:
+            if json_data is not None:
+                raw = _json.dumps(json_data).encode()
+                req_headers.setdefault("Content-Type", "application/json")
+                r = self._s.request(method, worker_req_url,
+                                    headers=req_headers, data=raw, **kwargs)
+            elif data is not None:
+                raw = data if isinstance(data, bytes) else str(data).encode()
+                r = self._s.request(method, worker_req_url,
+                                    headers=req_headers, data=raw, **kwargs)
+            else:
+                r = self._s.request(method, worker_req_url,
+                                    headers=req_headers, **kwargs)
+        except Exception as e:
+            raise ConnectionError(f"SimpleWorkerSession 连接失败: {e}")
+
+        # 更新 Cookie Jar（从响应 Set-Cookie）
+        set_cookie = ""
+        for k, v in r.headers.items():
+            if k.lower() == "set-cookie":
+                set_cookie = v
+                break
+        if not set_cookie:
+            # curl_cffi 有时把多值 header 合并
+            set_cookie = r.headers.get("set-cookie", "")
+        if set_cookie:
+            self.cookies.update_from_header(set_cookie)
+
+        return _WorkersResponse(
+            status_code=r.status_code,
+            text=r.text,
+            headers=dict(r.headers),
             cookies=self.cookies,
         )
 

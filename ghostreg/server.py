@@ -1333,11 +1333,9 @@ def _run_proto_batch(count: int, password: str, workers: int,
     if POOL_CLIENT_AVAILABLE:
         try:
             _test_cli = PoolClient(pool_url=DEFAULT_POOL_URL)
-            if _test_cli.ping():
+            if _test_cli.is_alive():
                 _pool_cli = _test_cli
                 logger.info("[A 池] 批量任务使用双层代理（SOCKS5 + Worker）")
-            else:
-                _test_cli.close()
         except Exception as _pe:
             logger.debug(f"[A 池] ping 失败，回退单层: {_pe}")
 
@@ -1408,12 +1406,7 @@ def _run_proto_batch(count: int, password: str, workers: int,
 
     proto_state.running = False
 
-    # 清理 A 池客户端
-    if _pool_cli:
-        try:
-            _pool_cli.close()
-        except Exception:
-            pass
+    # A 池客户端无需显式关闭（HTTP 短连接，无持久资源）
 
     # 加载最新的 protocol_accounts.json 作为历史
     proto_history_list = []
