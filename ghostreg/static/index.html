@@ -462,11 +462,23 @@
           <input type="text" id="protoLastName" placeholder="留空自动随机">
         </div>
       </div>
-      <!-- CF 代理池开关 -->
+      <!-- 简易 CF Worker URL（推荐） -->
+      <div style="margin-top:14px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.3);border-radius:8px;padding:12px 14px">
+        <div style="font-size:13px;font-weight:600;color:#818cf8;margin-bottom:6px">&#127760; CF Worker 代理（推荐，5 分钟搞定）</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">自己在 CF 控制台部署一个 Worker 脚本，填入地址即可。JB 注册请求走 CF 边缘节点出口，突破单 IP 限速，无需 API Token。</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="cfWorkerUrl" placeholder="https://xxxx.workers.dev"
+            style="flex:1;font-size:12px;padding:6px 10px;background:var(--panel);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+          <button onclick="saveCfWorkerUrl()" style="padding:6px 14px;font-size:12px;background:linear-gradient(135deg,#6366f1,#818cf8);color:#fff;border:none;border-radius:6px;cursor:pointer;white-space:nowrap">保存</button>
+        </div>
+        <div id="cfWorkerUrlStatus" style="font-size:11px;margin-top:5px;color:var(--muted)"></div>
+      </div>
+
+      <!-- CF 代理池开关（旧系统，高级） -->
       <div class="form-row" style="margin-top:12px;align-items:center">
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px">
           <input type="checkbox" id="protoUseProxy" onchange="cfToggleProxy(this.checked)">
-          <span>启用 Cloudflare 动态 IP 代理池</span>
+          <span style="color:var(--muted);font-size:13px">启用 Cloudflare 动态 IP 代理池（旧系统，需 API Token）</span>
           <span id="cfProxyBadge" style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--border);color:var(--muted)">未部署</span>
         </label>
       </div>
@@ -1659,6 +1671,12 @@ async function cfLoadSettings() {
     document.getElementById('cfAccountId').value = d.account_id || '';
     document.getElementById('cfWorkersCount').value = d.workers_count || 1;
     document.getElementById('cfLadderProxy').value = d.ladder_proxy || '';
+    // 简易 Worker URL
+    if (d.worker_url) {
+      document.getElementById('cfWorkerUrl').value = d.worker_url;
+      document.getElementById('cfWorkerUrlStatus').innerHTML =
+        '<span style="color:var(--success)">&#10003; 已配置，注册时自动走 CF 出口</span>';
+    }
     if (d.deployed) {
       cfUpdateBadge(true, d.deployed.healthy + '/' + d.deployed.deployed + ' Workers');
       document.getElementById('cfStatus').innerHTML = d.deployed.workers.map(w =>
@@ -1666,6 +1684,31 @@ async function cfLoadSettings() {
       ).join('');
     }
   } catch(e) { console.error('CF load error:', e); }
+}
+
+async function saveCfWorkerUrl() {
+  const url = document.getElementById('cfWorkerUrl').value.trim();
+  const statusEl = document.getElementById('cfWorkerUrlStatus');
+  if (!url) {
+    statusEl.innerHTML = '<span style="color:var(--error)">请填写 Worker URL</span>';
+    return;
+  }
+  statusEl.textContent = '保存中...';
+  try {
+    const resp = await fetch('/api/cf/worker-url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ worker_url: url }),
+    });
+    const d = await resp.json();
+    if (d.ok) {
+      statusEl.innerHTML = '<span style="color:var(--success)">&#10003; 已保存！注册时自动走 CF 出口</span>';
+    } else {
+      statusEl.innerHTML = '<span style="color:var(--error)">保存失败</span>';
+    }
+  } catch(e) {
+    statusEl.innerHTML = '<span style="color:var(--error)">网络错误: ' + e + '</span>';
+  }
 }
 
 async function cfSaveAndDeploy() {
@@ -1943,6 +1986,7 @@ handleMessage = function(msg) {
 loadApiKey();
 loadCaptchaConfig();
 loadCountries();
+cfLoadSettings();
 connectWS();
 </script>
 </body>

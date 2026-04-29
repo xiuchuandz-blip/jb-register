@@ -1120,8 +1120,20 @@ async def cf_get_settings():
         "workers_count": config.CF_WORKERS_COUNT,
         "ladder_proxy": config.CF_LADDER_PROXY,
         "enabled": config.CF_PROXY_ENABLED,
+        "worker_url": config.CF_WORKER_URL,
         "deployed": _proxy_pool.status_dict() if _proxy_pool and _proxy_pool.available else None,
     }
+
+
+class CFWorkerUrlRequest(BaseModel):
+    worker_url: str = ""
+
+
+@app.post("/api/cf/worker-url")
+async def cf_save_worker_url(req: CFWorkerUrlRequest):
+    """保存用户手动部署的单个 CF Worker URL"""
+    config.save_cf_worker_url(req.worker_url.strip())
+    return {"ok": True, "worker_url": config.CF_WORKER_URL}
 
 
 class CFSettingsRequest(BaseModel):
