@@ -1313,6 +1313,8 @@ def _run_proto_batch(count: int, password: str, workers: int,
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     has_proxy = proxy_pool is not None and proxy_pool.available
+    # 用户手动配置的单 Worker URL（无需部署旧 CF 代理池）
+    _manual_worker_url = config.CF_WORKER_URL or ""
 
     # A 池双层代理客户端（若服务在运行则启用）
     _pool_cli = None
@@ -1340,11 +1342,13 @@ def _run_proto_batch(count: int, password: str, workers: int,
         if task_id > 1 and first_name:
             fname = first_name + chr(96 + task_id)
 
-        # 为任务分配 Workers URL（每 5 个任务一组）
+        # 为任务分配 Workers URL（旧代理池 > 手动配置 Worker URL）
         worker_url = ""
         if has_proxy:
             group_id = (task_id - 1) // 5
             worker_url = proxy_pool.get_worker_url(group_id) or ""
+        if not worker_url and _manual_worker_url:
+            worker_url = _manual_worker_url
 
         # 更新状态
         if _pool_cli:
@@ -1372,7 +1376,7 @@ def _run_proto_batch(count: int, password: str, workers: int,
         })
         _broadcast_from_thread({"type": "proto_update", "task": proto_state.tasks[task_id]})
 
-    STAGGER = 8 if not has_proxy else 2  # 有代理池时错峰缩短（8轮压测验证：2s足够）
+    STAGGER = 2 if (has_proxy or _manual_worker_url or _pool_cli) else 8  # 有代理/Worker 时错峰缩短
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {}
