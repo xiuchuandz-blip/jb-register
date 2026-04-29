@@ -28,14 +28,63 @@ class JBRegError(Exception):
 
 
 class TencentCaptchaError(JBRegError):
-    """JetBrains 返回了腾讯验证码类型，当前不支持，需要重试"""
+    """JetBrains 返回了腾讯验证码类型,当前不支持,需要重试"""
     pass
+
+
+class CaptchaTokenInvalidError(JBRegError):
+    """
+    打码 token 被 JetBrains 拒绝(yescaptcha 偶发吐错 token)。
+    上层应保留 sessions_id,只重新打码而不换 IP/邮箱。
+    """
+    pass
+
+
+class SessionsBucketHitError(JBRegError):
+    """
+    OAuth sessions IP 桶撞墙(429)。
+    实测:JB 此处限流分级,撞过的 IP 越等越严(>45s 才恢复,且恢复后再撞会更严)。
+    上层应立即换 IP 重试,不要在原 IP 上等。
+    
+    Attributes:
+        step: 撞墙的步骤 ("Step2" / "Step5")
+        retry_after_ms: 服务端返回的退避毫秒(可能为 0)
+    """
+    def __init__(self, step: str, message: str = "", retry_after_ms: int = 0):
+        super().__init__(message or f"{step} sessions IP 桶 429")
+        self.step = step
+        self.retry_after_ms = retry_after_ms
 
 
 # 429 退避配置
 MAX_429_RETRIES = 6           # 遇到 429 最多重试次数
-BACKOFF_BASE = 5              # 初始退避秒数（实测 JB 限频窗口 ~10s）
+BACKOFF_BASE = 5              # 初始退避秒数(实测 JB 限频窗口 ~10s)
 BACKOFF_MAX = 30              # 最大退避秒数
+
+
+# SOCKS5/代理死亡特征关键字 — 双层代理下命中任一立即换 IP
+_SOCKS5_DEAD_KEYWORDS = (
+    "SOCKS5",                           # SOCKS5 connection / SOCKS5 authentication
+    "connection to proxy closed",
+    "Failed to receive SOCKS",
+    "BAD_DECRYPT",                      # BoringSSL SSL_read 解密失败(SOCKS5 串流损坏)
+    "SSL_read",
+    "BoringSSL",
+    "SSL routines",
+    "(28)",                             # curl timeout
+    "(7)",                              # curl couldn't connect
+    "(56)",                             # curl recv failure
+    "(35)",                             # curl SSL handshake failure
+    "Could not resolve host",
+    "Connection refused",
+    "Connection reset",
+    "Read timeout",
+)
+
+
+def _is_socks5_dead(err_msg: str) -> bool:
+    """判断异常是否是 SOCKS5/代理死亡(应立即换 IP)"""
+    return any(kw in err_msg for kw in _SOCKS5_DEAD_KEYWORDS)
 
 
 class JBRegisterer:
@@ -61,6 +110,11 @@ class JBRegisterer:
             try:
                 resp = self.s.post(url, **kwargs)
             except Exception as e:
+                err_msg = str(e)
+                # 双层代理 SOCKS5 类失败 → 立即换 IP,不在原 IP 上等
+                if _is_socks5_dead(err_msg):
+                    logger.warning(f"  [{label}] SOCKS5/代理失败,抛 SessionsBucketHitError 让上层换 IP: {e}")
+                    raise SessionsBucketHitError(label, message=f"代理连接失败: {err_msg[:120]}")
                 if attempt < 3:
                     wait = 2 + attempt * 2
                     logger.warning(f"  [{label}] 网络错误，{wait}s 后重试: {e}")
@@ -81,7 +135,10 @@ class JBRegisterer:
         raise JBRegError(f"{label} 连续 429 限频，放弃（已重试 {MAX_429_RETRIES} 次）")
 
     def _get_with_retry(self, url: str, label: str, **kwargs):
-        """带 TLS/429 重试的 GET"""
+        """带 TLS/429 重试的 GET。
+        SOCKS5 连接失败 → 立即抛 SessionsBucketHitError 让上层换 IP(跟撞 429 同等处理)
+        非 SOCKS5 类网络错误 → 短重试 4 次
+        """
         for attempt in range(4):
             try:
                 resp = self.s.get(url, **kwargs)
@@ -92,10 +149,18 @@ class JBRegisterer:
                     continue
                 return resp
             except Exception as e:
+                err_msg = str(e)
+                # 双层代理 SOCKS5 类失败 → 立即换 IP,不在原 IP 上等
+                # 双层代理 SOCKS5 类失败 → 立即抛让上层换 IP
+                if _is_socks5_dead(err_msg):
+                    logger.warning(f"  [{label}] SOCKS5/代理失败,抛 SessionsBucketHitError 让上层换 IP: {e}")
+                    raise SessionsBucketHitError(label, message=f"代理连接失败: {err_msg[:120]}")
                 wait = 2 + attempt * 2
                 logger.warning(f"  [{label}] 第 {attempt+1} 次失败: {e}，{wait}s 后重试")
                 time.sleep(wait)
-        raise JBRegError(f"{label} 4 次重试均失败")
+        # 4 次重试都失败,网络环境本身可能也有问题。也抛 SessionsBucketHitError 让上层换 IP 重新试
+        # (而不是 JBRegError 直接 fail)
+        raise SessionsBucketHitError(label, message=f"{label} 4 次重试均失败,可能 SOCKS5 不稳定")
 
     # ── 注册流程 ──
 
@@ -118,12 +183,28 @@ class JBRegisterer:
         logger.info(f"  CSRF: {self.csrf[:20]}...")
 
     def _create_auth_session(self):
-        """Step 2: POST /api/auth/sessions（带 429 重试）"""
+        """
+        Step 2: POST /api/auth/sessions
+        撞 429 → SessionsBucketHitError(上层换 IP 重试,不在原 IP 等)
+        实测:此接口 IP 桶 5/30s,>45s 恢复,撞过的 IP 加严限流。
+        """
         logger.info("[Step 2] 创建 auth session...")
-        resp = self._post_with_retry(
-            f"{BASE_URL}/api/auth/sessions", "Step2",
-            headers=self._api_headers(),
-        )
+        try:
+            resp = self.s.post(
+                f"{BASE_URL}/api/auth/sessions",
+                headers=self._api_headers(),
+            )
+        except Exception as e:
+            err_msg = str(e)
+            # SOCKS5 死了 → 立即换 IP
+            if _is_socks5_dead(err_msg):
+                raise SessionsBucketHitError("Step2", message=f"代理连接失败: {err_msg[:120]}")
+            raise JBRegError(f"Step2 网络错误: {e}")
+        
+        if resp.status_code == 429:
+            retry_ms = self._read_retry_after_ms(resp)
+            logger.warning(f"  [Step2] 撞 sessions IP 桶 429 (retry-after-ms={retry_ms}),抛异常让上层换 IP")
+            raise SessionsBucketHitError("Step2", retry_after_ms=retry_ms)
         if resp.status_code != 200:
             raise JBRegError(f"创建 session 失败: {resp.status_code} {resp.text[:200]}")
 
@@ -145,6 +226,9 @@ class JBRegisterer:
                 json={"email": email},
             )
         except Exception as e:
+            err_msg = str(e)
+            if _is_socks5_dead(err_msg):
+                raise SessionsBucketHitError("Step3", message=f"代理连接失败: {err_msg[:120]}")
             raise JBRegError(f"email/signup 网络错误: {e}")
 
         if resp.status_code == 429:
@@ -174,20 +258,49 @@ class JBRegisterer:
         if resp.status_code in (200, 204):
             logger.info(f"  {resp.status_code} → captcha 验证通过")
             return
+        # 400 CaptchaVerificationFailed = 打码平台偶发吐错 token,重新打码即可
+        if resp.status_code == 400 and "CaptchaVerificationFailed" in resp.text:
+            raise CaptchaTokenInvalidError(f"打码 token 被 JB 拒绝(打码平台偶发,重新打码): {resp.text[:120]}")
         raise JBRegError(f"captcha/verify 失败: {resp.status_code} {resp.text[:200]}")
 
     def _submit_email_retry(self, email: str):
-        """Step 5: captcha 通过后重新提交邮箱（带 429 重试）"""
-        logger.info("[Step 5] 重新提交邮箱（发送 OTP）...")
-        resp = self._post_with_retry(
-            f"{BASE_URL}/api/auth/sessions/{self.session_id}/email/signup", "Step5-email",
-            headers=self._api_headers(),
-            json={"email": email},
-        )
+        """
+        Step 5: captcha 通过后重新提交邮箱(发 OTP)。
+        撞 429 → SessionsBucketHitError(上层保留 session_id 换 IP 重试,
+        不浪费已经打过的 captcha 积分)
+        """
+        logger.info("[Step 5] 重新提交邮箱(发送 OTP)...")
+        try:
+            resp = self.s.post(
+                f"{BASE_URL}/api/auth/sessions/{self.session_id}/email/signup",
+                headers=self._api_headers(),
+                json={"email": email},
+            )
+        except Exception as e:
+            err_msg = str(e)
+            if _is_socks5_dead(err_msg):
+                raise SessionsBucketHitError("Step5", message=f"代理连接失败: {err_msg[:120]}")
+            raise JBRegError(f"Step5 网络错误: {e}")
+        
+        if resp.status_code == 429:
+            retry_ms = self._read_retry_after_ms(resp)
+            logger.warning(f"  [Step5] 撞 sessions IP 桶 429 (retry-after-ms={retry_ms}),抛异常让上层换 IP(保留 session_id)")
+            raise SessionsBucketHitError("Step5", retry_after_ms=retry_ms)
         if resp.status_code == 200:
             logger.info("  200 → 验证码邮件已发送")
             return
         raise JBRegError(f"email/signup 重试失败: {resp.status_code} {resp.text[:200]}")
+    
+    @staticmethod
+    def _read_retry_after_ms(resp) -> int:
+        """读 retry-after-ms 头(JB 自定义,毫秒级倒计时)。没有就返回 0"""
+        try:
+            v = resp.headers.get("retry-after-ms") or resp.headers.get("Retry-After-Ms")
+            if v:
+                return int(v)
+        except Exception:
+            pass
+        return 0
 
     def _submit_otp(self, otp_code: str):
         """Step 6: POST otp/email（带 429 重试）"""

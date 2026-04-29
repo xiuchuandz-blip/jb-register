@@ -6,6 +6,9 @@ import asyncio
 import csv
 import json
 import logging
+import os
+import subprocess
+import sys as _sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -32,6 +35,14 @@ try:
     PROTOCOL_REG_AVAILABLE = True
 except ImportError:
     PROTOCOL_REG_AVAILABLE = False
+
+# A 池（双层代理）HTTP 客户端
+try:
+    from protocol_reg.pool_client import PoolClient, DEFAULT_POOL_URL
+    POOL_CLIENT_AVAILABLE = True
+except ImportError:
+    POOL_CLIENT_AVAILABLE = False
+    DEFAULT_POOL_URL = "http://127.0.0.1:7861"
 
 logger = logging.getLogger("ghostreg.server")
 
@@ -142,6 +153,86 @@ async def _on_startup():
             logger.info(f"已清理 {cleaned} 个过期浏览器数据目录")
     except Exception as e:
         logger.warning(f"清理浏览器数据失败: {e}")
+    # 启动 A 池（双层代理）子进程
+    try:
+        _start_proxy_pool_subprocess()
+    except Exception as e:
+        logger.warning(f"启动 A 池服务失败（双层代理将不可用，会回退单层）: {e}")
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    """关闭时杀掉 A 池子进程"""
+    _stop_proxy_pool_subprocess()
+
+
+# ── A 池（双层代理）子进程管理 ──
+
+_pool_subprocess: "subprocess.Popen | None" = None
+_PROJECT_ROOT = Path(__file__).parent.parent
+_POOL_LOG_DIR = _PROJECT_ROOT / "output"
+
+
+def _start_proxy_pool_subprocess() -> bool:
+    """后台启动 A 池服务（tools/proxy_pool/pool_server.py，默认端口 7861）。"""
+    global _pool_subprocess
+
+    if _pool_subprocess and _pool_subprocess.poll() is None:
+        logger.info("[A 池] 子进程已在运行")
+        return False
+
+    pool_script = _PROJECT_ROOT / "tools" / "proxy_pool" / "pool_server.py"
+    if not pool_script.exists():
+        logger.warning(f"[A 池] 脚本不存在，跳过启动: {pool_script}")
+        return False
+
+    # 检查端口 7861 是否已被占用
+    try:
+        import socket as _socket
+        s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        s.settimeout(0.5)
+        if s.connect_ex(("127.0.0.1", 7861)) == 0:
+            s.close()
+            logger.info("[A 池] 7861 端口已被占用（可能用户手动启动了 A 池），跳过自动启动")
+            return False
+        s.close()
+    except Exception:
+        pass
+
+    try:
+        _POOL_LOG_DIR.mkdir(exist_ok=True)
+        log_fd = open(_POOL_LOG_DIR / "proxy_pool.log", "ab")
+        creationflags = 0
+        if _sys.platform == "win32":
+            creationflags = subprocess.CREATE_NO_WINDOW  # type: ignore
+        _pool_subprocess = subprocess.Popen(
+            [_sys.executable, "-u", "-m", "tools.proxy_pool.pool_server"],
+            cwd=str(_PROJECT_ROOT),
+            stdout=log_fd,
+            stderr=log_fd,
+            creationflags=creationflags,
+        )
+        logger.info(f"[A 池] 已启动子进程 PID={_pool_subprocess.pid}")
+        return True
+    except Exception as e:
+        logger.warning(f"[A 池] 启动失败: {e}")
+        return False
+
+
+def _stop_proxy_pool_subprocess():
+    """关闭 A 池子进程"""
+    global _pool_subprocess
+    if _pool_subprocess and _pool_subprocess.poll() is None:
+        try:
+            _pool_subprocess.terminate()
+            try:
+                _pool_subprocess.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _pool_subprocess.kill()
+            logger.info("[A 池] 子进程已停止")
+        except Exception as e:
+            logger.warning(f"[A 池] 停止失败: {e}")
+    _pool_subprocess = None
 
 
 @app.websocket("/ws")
@@ -1223,6 +1314,19 @@ def _run_proto_batch(count: int, password: str, workers: int,
 
     has_proxy = proxy_pool is not None and proxy_pool.available
 
+    # A 池双层代理客户端（若服务在运行则启用）
+    _pool_cli = None
+    if POOL_CLIENT_AVAILABLE:
+        try:
+            _test_cli = PoolClient(pool_url=DEFAULT_POOL_URL)
+            if _test_cli.ping():
+                _pool_cli = _test_cli
+                logger.info("[A 池] 批量任务使用双层代理（SOCKS5 + Worker）")
+            else:
+                _test_cli.close()
+        except Exception as _pe:
+            logger.debug(f"[A 池] ping 失败，回退单层: {_pe}")
+
     def _random_name(length=5):
         first = random.choice(string.ascii_uppercase)
         rest = ''.join(random.choices(string.ascii_lowercase, k=length - 1))
@@ -1243,15 +1347,19 @@ def _run_proto_batch(count: int, password: str, workers: int,
             worker_url = proxy_pool.get_worker_url(group_id) or ""
 
         # 更新状态
-        step_label = "申请邮箱"
-        if worker_url:
-            step_label = f"申请邮箱 (CF代理)"
+        if _pool_cli:
+            step_label = "申请邮箱 (A池双层)"
+        elif worker_url:
+            step_label = "申请邮箱 (CF代理)"
+        else:
+            step_label = "申请邮箱"
         proto_state.tasks[task_id]["step"] = step_label
         _broadcast_from_thread({"type": "proto_update", "task": proto_state.tasks[task_id]})
 
         result = proto_register_single(
             task_id, password, fname, lname,
             worker_url=worker_url, ladder_proxy=ladder_proxy,
+            pool_client=_pool_cli,
         )
 
         # 更新最终状态
@@ -1283,6 +1391,13 @@ def _run_proto_batch(count: int, password: str, workers: int,
                 proto_state.tasks[tid].update({"success": False, "error": str(e), "step": f"异常: {e}"})
 
     proto_state.running = False
+
+    # 清理 A 池客户端
+    if _pool_cli:
+        try:
+            _pool_cli.close()
+        except Exception:
+            pass
 
     # 加载最新的 protocol_accounts.json 作为历史
     proto_history_list = []

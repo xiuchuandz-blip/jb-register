@@ -27,6 +27,7 @@ CF_ACCOUNT_ID = ""              # Cloudflare Account ID
 CF_WORKERS_COUNT = 1            # 部署 Workers 数量（默认 1，每个 Workers 自带 IP 轮转）
 CF_LADDER_PROXY = ""            # 梯子代理地址（如 http://127.0.0.1:7890）
 CF_PROXY_ENABLED = False        # 是否启用 CF 代理池
+CF_WORKER_URL = ""              # 用户自己部署的专属 Worker URL（双层代理第二层）
 
 # ── 注册参数 ──
 DEFAULT_PASSWORD = "GhostReg2026"
@@ -100,30 +101,46 @@ def save_captcha_config(platform: str, client_key: str):
 
 def load_cf_config():
     """从 settings.json 加载 Cloudflare 代理池配置"""
-    global CF_API_TOKEN, CF_ACCOUNT_ID, CF_WORKERS_COUNT, CF_LADDER_PROXY, CF_PROXY_ENABLED
+    global CF_API_TOKEN, CF_ACCOUNT_ID, CF_WORKERS_COUNT, CF_LADDER_PROXY, CF_PROXY_ENABLED, CF_WORKER_URL
     data = _load_settings()
     CF_API_TOKEN = data.get("cf_api_token", "")
     CF_ACCOUNT_ID = data.get("cf_account_id", "")
     CF_WORKERS_COUNT = data.get("cf_workers_count", 1)
     CF_LADDER_PROXY = data.get("cf_ladder_proxy", "")
     CF_PROXY_ENABLED = data.get("cf_proxy_enabled", False)
+    CF_WORKER_URL = data.get("cf_worker_url", "")
 
 
 def save_cf_config(api_token: str, account_id: str, workers_count: int = 1,
-                   ladder_proxy: str = "", enabled: bool = False):
+                   ladder_proxy: str = "", enabled: bool = False,
+                   worker_url: str | None = None):
     """保存 Cloudflare 代理池配置到 settings.json"""
-    global CF_API_TOKEN, CF_ACCOUNT_ID, CF_WORKERS_COUNT, CF_LADDER_PROXY, CF_PROXY_ENABLED
+    global CF_API_TOKEN, CF_ACCOUNT_ID, CF_WORKERS_COUNT, CF_LADDER_PROXY, CF_PROXY_ENABLED, CF_WORKER_URL
     CF_API_TOKEN = api_token
     CF_ACCOUNT_ID = account_id
     CF_WORKERS_COUNT = workers_count
     CF_LADDER_PROXY = ladder_proxy
     CF_PROXY_ENABLED = enabled
+    if worker_url is not None:
+        CF_WORKER_URL = worker_url
     data = _load_settings()
     data["cf_api_token"] = api_token
     data["cf_account_id"] = account_id
     data["cf_workers_count"] = workers_count
     data["cf_ladder_proxy"] = ladder_proxy
     data["cf_proxy_enabled"] = enabled
+    if worker_url is not None:
+        data["cf_worker_url"] = worker_url
+    _save_settings(data)
+
+
+def save_cf_worker_url(worker_url: str):
+    """保存用户专属 Worker URL 到 settings.json"""
+    global CF_WORKER_URL, CF_PROXY_ENABLED
+    CF_WORKER_URL = worker_url.rstrip("/")
+    data = _load_settings()
+    data["cf_worker_url"] = CF_WORKER_URL
+    data["cf_proxy_enabled"] = bool(CF_WORKER_URL)
     _save_settings(data)
 
 

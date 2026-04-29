@@ -48,11 +48,18 @@ _DOMAIN_CACHE_TTL = 600  # 域名列表缓存 10 分钟
 
 
 def _pick_random_domain() -> str:
-    """从 YYDS Mail 获取域名列表，随机选一个（带缓存，10 分钟刷新）"""
+    """从 YYDS Mail 获取域名列表，随机选一个（带缓存 + 黑名单过滤）"""
     global _domain_cache, _domain_cache_time
+    from . import email_blacklist
 
     if _domain_cache and (time.time() - _domain_cache_time) < _DOMAIN_CACHE_TTL:
-        return random.choice(_domain_cache)
+        # 缓存命中也要每次过滤黑名单（黑名单可能动态更新）
+        usable = email_blacklist.filter_domains(_domain_cache)
+        if usable:
+            return random.choice(usable)
+        # 全部被拉黑（极端），强制刷新
+        logger.warning("缓存域名全部命中黑名单，强制刷新")
+        _domain_cache = []
 
     api_key = _get_api_key()
     client = _new_client()
@@ -76,7 +83,11 @@ def _pick_random_domain() -> str:
         _domain_cache_time = time.time()
         logger.info(f"域名列表已缓存: {len(_domain_cache)} 个健康域名")
 
-        return random.choice(_domain_cache)
+        # 过滤黑名单
+        usable = email_blacklist.filter_domains(_domain_cache)
+        if not usable:
+            raise RuntimeError("所有域名都在黑名单中（不应发生）")
+        return random.choice(usable)
     finally:
         client.close()
 

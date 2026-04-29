@@ -25,29 +25,35 @@ _BROWSER_HEADERS = {
 
 
 def new_session(verify: bool = True, worker_url: str = "",
-                ladder_proxy: str = "") -> Session:
+                ladder_proxy: str = "", socks5_proxy: str = "") -> Session:
     """
     创建一个伪装 Chrome 147 TLS 指纹的 HTTP Session。
     - JA3/JA4/HTTP2 指纹与真实 Chrome 一致
-    - 自带 Cookie Jar（自动管理 JSESSIONID、_st-JBA 等）
+    - 自带 Cookie Jar(自动管理 JSESSIONID、_st-JBA 等)
     - verify=False 用于梯子 TUN 模式 SSL 兼容
     
     Args:
         verify: SSL 验证开关
-        worker_url: CF Workers URL（如有则返回 WorkersSession 代理模式）
-        ladder_proxy: 梯子代理地址（Workers 模式下用于连接被墙的 workers.dev）
+        worker_url: CF Workers URL(如有则返回 WorkersSession 代理模式)
+        ladder_proxy: 梯子代理地址(单层模式下用于连接被墙的 workers.dev)
+        socks5_proxy: SOCKS5 代理(双层链路:本机 → SOCKS5 → Worker → JB)
+                      传入时自动覆盖 ladder_proxy,内部会转 socks5h:// 走远端 DNS
     """
     if worker_url:
-        # Workers 代理模式：通过 CF Workers /proxy 端点转发请求
+        # Workers 代理模式:通过 CF Workers /proxy 端点转发请求
         from ghostreg.proxy_pool import WorkersSession
         ws = WorkersSession(
             worker_url=worker_url,
             ladder_proxy=ladder_proxy,
+            socks5_proxy=socks5_proxy,
             verify=verify,
         )
-        # 设置默认 headers（与直连模式一致）
+        # 设置默认 headers(与直连模式一致)
         ws.headers.update(_BROWSER_HEADERS)
-        logger.info(f"[Client] Workers 代理模式: {worker_url}")
+        if socks5_proxy:
+            logger.info(f"[Client] 双层代理模式: SOCKS5={socks5_proxy} → Worker={worker_url}")
+        else:
+            logger.info(f"[Client] Workers 代理模式: {worker_url}")
         return ws  # type: ignore  # WorkersSession 实现了兼容接口
     
     # 直连模式
