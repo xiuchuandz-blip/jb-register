@@ -445,7 +445,10 @@
         </div>
         <div class="form-group">
           <label>密码</label>
-          <input type="text" id="protoPassword" value="QPalzmw123">
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="text" id="protoPassword" value="QPalzmw123" style="flex:1">
+            <button type="button" class="btn btn-secondary btn-small" onclick="genProtoRandomPassword()" title="随机生成16位密码" style="white-space:nowrap;flex-shrink:0">随机</button>
+          </div>
           <div class="form-hint">* 仅限英文字母和数字</div>
         </div>
       </div>
@@ -1697,6 +1700,15 @@ function cfUpdateBadge(ok, text) {
 // ── 协议注册机 ──
 
 let protoTasks = {}, protoHistoryData = [];
+
+function genProtoRandomPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let pwd = '';
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  arr.forEach(b => { pwd += chars[b % chars.length]; });
+  document.getElementById('protoPassword').value = pwd;
+}
 
 async function protoStart() {
   const btn = document.getElementById('btnProtoStart');
