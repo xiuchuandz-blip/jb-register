@@ -1,0 +1,14 @@
+{
+  "acgfun.lol": {
+    "failures": 2,
+    "last_failure": 1777586625.3030994,
+    "blacklisted_at": 1777586625.3031008,
+    "last_reason": "邮件超时(120s)"
+  },
+  "wjhzzc.cn": {
+    "failures": 2,
+    "last_failure": 1777576736.4899251,
+    "blacklisted_at": 1777576736.4899275,
+    "last_reason": "邮件超时(120s)"
+  }
+}

@@ -885,6 +885,18 @@ def _make_status_callback(task_id: int):
     return callback
 
 
+def _random_password(length: int = 10) -> str:
+    """生成随机密码：2 大写 + (length-4) 小写 + 2 数字，打乱顺序"""
+    import random as _rng, string as _s
+    chars = (
+        _rng.choices(_s.ascii_uppercase, k=2)
+        + _rng.choices(_s.ascii_lowercase, k=length - 4)
+        + _rng.choices(_s.digits, k=2)
+    )
+    _rng.shuffle(chars)
+    return "".join(chars)
+
+
 def _run_batch(count: int, password: str, first_name: str, last_name: str, browser: str = "chrome",
                country: str = "JP", auto_tokens: bool = False, ai_captcha: bool = False):
     with ThreadPoolExecutor(max_workers=count) as executor:
@@ -892,8 +904,9 @@ def _run_batch(count: int, password: str, first_name: str, last_name: str, brows
         for i in range(1, count + 1):
             if not state.running:
                 break
+            task_pwd = _random_password()   # 每个账号独立随机密码
             future = executor.submit(
-                _run_single_task, i, password, first_name, last_name, browser,
+                _run_single_task, i, task_pwd, first_name, last_name, browser,
                 country, auto_tokens, ai_captcha
             )
             futures[future] = i
@@ -926,8 +939,9 @@ def _run_batch_force(start_id: int, count: int, password: str, first_name: str, 
             tid = start_id + i
             if not state.running:
                 break
+            task_pwd = _random_password()   # 每个账号独立随机密码
             future = executor.submit(
-                _run_single_task, tid, password, first_name, last_name, browser,
+                _run_single_task, tid, task_pwd, first_name, last_name, browser,
                 country, auto_tokens, ai_captcha
             )
             futures[future] = tid
@@ -1351,6 +1365,7 @@ def _run_proto_batch(count: int, password: str, workers: int,
         lname = last_name or _random_name(random.randint(4, 7))
         if task_id > 1 and first_name:
             fname = first_name + chr(96 + task_id)
+        task_pwd = _random_password()   # 每个账号独立随机密码
 
         # 为任务分配 Workers URL（旧代理池 > 手动配置 Worker URL）
         worker_url = ""
@@ -1371,14 +1386,15 @@ def _run_proto_batch(count: int, password: str, workers: int,
         _broadcast_from_thread({"type": "proto_update", "task": proto_state.tasks[task_id]})
 
         result = proto_register_single(
-            task_id, password, fname, lname,
+            task_id, task_pwd, fname, lname,
             worker_url=worker_url, ladder_proxy=ladder_proxy,
             pool_client=_pool_cli,
         )
 
-        # 更新最终状态
+        # 更新最终状态（含密码，保证 CSV 导出记录正确密码）
         proto_state.tasks[task_id].update({
             "email": result.email,
+            "password": task_pwd if result.success else "",
             "success": result.success,
             "error": result.error,
             "elapsed": round(result.elapsed, 1),
