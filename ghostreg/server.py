@@ -1548,6 +1548,26 @@ def _apply_reset_to_history(emails: list[str]):
 
     success_emails = set(pwd_map.keys())
 
+    # ── 无论是否在历史里，都追加写入 reset_results.json（防页面刷新丢失） ──
+    RESET_RESULTS_JSON = DATA_DIR / "reset_results.json"
+    try:
+        import datetime as _dt
+        existing = []
+        if RESET_RESULTS_JSON.exists():
+            try:
+                existing = json.loads(RESET_RESULTS_JSON.read_text(encoding="utf-8"))
+            except Exception:
+                existing = []
+        ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for em, pwd in pwd_map.items():
+            existing.append({"email": em, "password": pwd, "reset_time": ts})
+        RESET_RESULTS_JSON.write_text(
+            json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        logger.info(f"[改密] 结果已追加写入 reset_results.json ({len(pwd_map)} 条)")
+    except Exception as _e:
+        logger.warning(f"[改密] 写入 reset_results.json 失败: {_e}")
+
     changed = False
     with _file_lock:
         # ── 浏览器注册历史 ──
