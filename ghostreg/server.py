@@ -1471,7 +1471,7 @@ async def reset_password_batch(req: ResetPasswordRequest):
     _reset_running = True
     _reset_tasks = {}
     for email in req.emails:
-        _reset_tasks[email] = {"email": email, "status": "pending", "message": "等待中", "ok": None}
+        _reset_tasks[email] = {"email": email, "status": "pending", "message": "等待中", "ok": None, "new_password": ""}
 
     _broadcast_from_thread({"type": "reset_started", "tasks": _reset_tasks})
 
@@ -1491,7 +1491,7 @@ async def reset_status():
 
 
 def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
-    """后台线程：逐个执行改密任务"""
+    """后台线程：逐个执行改密任务（每个账号随机生成独立密码）"""
     global _reset_running, _reset_tasks
 
     from .reset_password import reset_account_password
@@ -1504,13 +1504,16 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
 
     for email in emails:
+        # 每个账号独立生成随机密码
+        task_pwd = _random_password()
+        _reset_tasks[email]["new_password"] = task_pwd
         _reset_tasks[email]["status"] = "running"
         _reset_tasks[email]["message"] = "正在处理..."
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
 
         result = reset_account_password(
             email=email,
-            new_password=new_password,
+            new_password=task_pwd,
             progress_cb=_progress,
             poll_timeout=float(poll_timeout),
         )
@@ -1518,6 +1521,8 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
         _reset_tasks[email]["ok"] = result.get("ok")
         _reset_tasks[email]["status"] = "done" if result.get("ok") else "failed"
         _reset_tasks[email]["message"] = result.get("message") or result.get("error") or ""
+        if not result.get("ok"):
+            _reset_tasks[email]["new_password"] = ""   # 失败则不展示密码
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
 
         # 每个账号间稍微间隔，避免过快触发速率限制
@@ -1526,22 +1531,30 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
     _reset_running = False
     _broadcast_from_thread({"type": "reset_completed", "tasks": _reset_tasks})
 
-    # 改密成功的账号，更新 history 中的密码
-    _apply_reset_to_history(emails, new_password)
+    # 改密成功的账号，更新 history 中的密码（用各自的随机密码）
+    _apply_reset_to_history(emails)
 
 
-def _apply_reset_to_history(emails: list[str], new_password: str):
-    """将改密成功的账号更新到 history 记录（浏览器+协议）中"""
-    success_emails = {e for e, t in _reset_tasks.items() if t.get("ok")}
-    if not success_emails:
+def _apply_reset_to_history(emails: list[str]):
+    """将改密成功的账号更新到 history 记录（浏览器+协议）中，各自使用生成的随机密码"""
+    # 构建 email → new_password 映射（仅成功且有密码的）
+    pwd_map = {
+        e: t["new_password"]
+        for e, t in _reset_tasks.items()
+        if t.get("ok") and t.get("new_password")
+    }
+    if not pwd_map:
         return
+
+    success_emails = set(pwd_map.keys())
 
     changed = False
     with _file_lock:
         # ── 浏览器注册历史 ──
         for h in state.history:
-            if h.get("email") in success_emails:
-                h["password"] = new_password
+            em = h.get("email")
+            if em in success_emails:
+                h["password"] = pwd_map[em]
                 changed = True
         if changed:
             ACCOUNTS_JSON.write_text(
@@ -1557,8 +1570,9 @@ def _apply_reset_to_history(emails: list[str], new_password: str):
             else:
                 proto_records = []
             for r in proto_records:
-                if r.get("email") in success_emails:
-                    r["password"] = new_password
+                em = r.get("email")
+                if em in success_emails:
+                    r["password"] = pwd_map[em]
                     proto_changed = True
             if proto_changed:
                 PROTO_ACCOUNTS_JSON.write_text(

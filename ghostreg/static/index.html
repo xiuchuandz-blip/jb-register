@@ -97,7 +97,9 @@
   .reset-dot.done { background:var(--success); }
   .reset-dot.failed { background:var(--error); }
   .reset-email { font-family:Consolas,monospace; flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .reset-msg { color:var(--muted); font-size:11px; flex-shrink:0; max-width:160px; text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .reset-msg { color:var(--muted); font-size:11px; flex-shrink:0; max-width:220px; text-align:right; }
+  .reset-pwd { margin-top:3px; color:var(--success); font-size:11px; white-space:nowrap; }
+  .reset-pwd code { font-family:Consolas,monospace; letter-spacing:.5px; }
 </style>
 </head>
 <body>
@@ -1221,10 +1223,15 @@ function renderResetProgress(tasks) {
     const t = tasks[email] || { status: 'pending', message: '等待中' };
     const cls = t.status === 'done' ? 'done' : t.status === 'failed' ? 'failed' : t.status === 'running' ? 'running' : '';
     const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '✗' : '…';
+    const pwdLine = (t.status === 'done' && t.new_password)
+      ? `<div class="reset-pwd">新密码: <code>${esc(t.new_password)}</code></div>`
+      : '';
     html += `<div class="reset-item ${cls}">
       <div class="reset-dot ${cls}"></div>
       <div class="reset-email" title="${esc(email)}">${esc(email)}</div>
-      <div class="reset-msg" title="${esc(t.message||'')}">${esc(t.message||t.status||'')}</div>
+      <div class="reset-msg" title="${esc(t.message||'')}">
+        ${esc(t.message||t.status||'')}${pwdLine}
+      </div>
     </div>`;
   }
   list.innerHTML = html || '<div style="color:var(--muted);font-size:13px">准备中...</div>';
@@ -1247,14 +1254,17 @@ function handleResetMessage(msg) {
     renderResetProgress(msg.tasks || {});
     document.getElementById('btnResetStart').textContent = '完成';
     document.getElementById('btnResetCancel').textContent = '关闭';
-    // 如果有成功的，更新本地历史密码显示
+    // 改密成功的账号，前端本地 history 密码列同步（后端也会推 history_update）
     const tasks = msg.tasks || {};
+    let localChanged = false;
     for (const h of history) {
       const t = tasks[h.email];
-      if (t && t.ok) {
-        // history 会由 WebSocket history_update 刷新
+      if (t && t.ok && t.new_password) {
+        h.password = t.new_password;
+        localChanged = true;
       }
     }
+    if (localChanged) renderHistory();
   }
 }
 
