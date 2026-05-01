@@ -92,6 +92,34 @@ def _pick_random_domain() -> str:
         client.close()
 
 
+def get_yyds_domain_set() -> set[str]:
+    """
+    返回当前 YYDS Mail 可用域名集合（小写）。
+    优先从缓存读取，缓存过期则重新拉取。用于改密前的域名可用性预检。
+    """
+    global _domain_cache, _domain_cache_time
+    if _domain_cache and (time.time() - _domain_cache_time) < _DOMAIN_CACHE_TTL:
+        return {d.lower() for d in _domain_cache}
+    try:
+        api_key = _get_api_key()
+        client = _new_client()
+        try:
+            resp = client.get(
+                f"{config.YYDS_API_BASE}/domains",
+                headers={"X-API-Key": api_key},
+            )
+            data = resp.json()
+            domains = data.get("data", [])
+        finally:
+            client.close()
+        if domains:
+            _domain_cache = [d["domain"] for d in domains]
+            _domain_cache_time = time.time()
+    except Exception:
+        pass
+    return {d.lower() for d in _domain_cache}
+
+
 def apply_email(username: str | None = None, max_retries: int = 3) -> str:
     """
     通过 YYDS Mail API 申请一个临时邮箱（带重试，防网络波动）。

@@ -20,6 +20,7 @@ from . import config
 from .email_service import (
     _get_api_key, _new_client, _account_cache,
     get_mails, delete_email, extract_verification_code,
+    get_yyds_domain_set,
 )
 
 logger = logging.getLogger("ghostreg.reset_password")
@@ -489,6 +490,40 @@ def reset_account_password(
         return {"ok": False, "error": "邮箱格式无效"}
 
     local_part, domain = email.split("@", 1)
+
+    # 预检：该域名是否属于 YYDS 临时邮箱服务
+    _EXTERNAL_DOMAINS = {
+        "outlook.com", "outlook.cn", "hotmail.com", "hotmail.cn",
+        "live.com", "live.cn", "msn.com",
+        "gmail.com", "googlemail.com",
+        "qq.com", "163.com", "126.com", "sina.com", "sina.cn",
+        "yahoo.com", "yahoo.co.jp", "protonmail.com", "icloud.com",
+    }
+    domain_lower = domain.lower()
+    if domain_lower in _EXTERNAL_DOMAINS:
+        return {
+            "ok": False,
+            "error": (
+                f"该账号使用真实外部邮箱 (@{domain}) 注册，"
+                "自动改密功能仅支持通过 YYDS 临时邮箱注册的账号。"
+                "请手动访问 JetBrains 忘记密码页面完成重置。"
+            ),
+        }
+
+    # 检查 YYDS 当前可用域名池，判断域名是否已下线
+    try:
+        yyds_domains = get_yyds_domain_set()
+        if yyds_domains and domain_lower not in yyds_domains:
+            return {
+                "ok": False,
+                "error": (
+                    f"域名 @{domain} 当前不在 YYDS Mail 可用列表中，"
+                    "该域名可能已被下线（临时邮箱通常只存活数小时到数天）。"
+                    "无法重建收件箱，改密流程终止。"
+                ),
+            }
+    except Exception:
+        pass  # 查不到域名列表时不阻断，让后续步骤自然报错
 
     # Step 1: 重建临时邮箱
     log("重建临时邮箱...", "recreate_email")
