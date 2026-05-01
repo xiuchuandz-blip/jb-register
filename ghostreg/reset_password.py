@@ -510,16 +510,16 @@ def reset_account_password(
             ),
         }
 
-    # 检查 YYDS 当前可用域名池，判断域名是否已下线
+    # 检查 YYDS 当前可用域名池：不在列表 = 旧服务域名或已下线域名
     try:
         yyds_domains = get_yyds_domain_set()
         if yyds_domains and domain_lower not in yyds_domains:
             return {
                 "ok": False,
                 "error": (
-                    f"域名 @{domain} 当前不在 YYDS Mail 可用列表中，"
-                    "该域名可能已被下线（临时邮箱通常只存活数小时到数天）。"
-                    "无法重建收件箱，改密流程终止。"
+                    f"域名 @{domain} 不属于当前 YYDS Mail 临时邮箱服务。"
+                    "该账号可能是通过旧版邮箱服务（如 nimail.cn）或其他平台注册的，"
+                    "自动改密无法获取该收件箱，请手动到 JetBrains 忘记密码页面完成重置。"
                 ),
             }
     except Exception:
