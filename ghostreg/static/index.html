@@ -407,7 +407,10 @@
       </div>
       <div id="resetProgressArea" style="display:none">
         <div class="reset-progress" id="resetProgressList"></div>
-        <div id="resetSummary" style="margin-top:12px;font-size:13px;text-align:right;color:var(--muted)"></div>
+        <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <button class="btn btn-secondary btn-small" id="btnCopyResetResult" style="display:none" onclick="copyResetResult()">一键复制</button>
+          <div id="resetSummary" style="font-size:13px;color:var(--muted);margin-left:auto"></div>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeResetModal()" id="btnResetCancel">取消</button>
@@ -1155,6 +1158,7 @@ function openResetModal(emails) {
   }
   document.getElementById('resetFormArea').style.display = '';
   document.getElementById('resetProgressArea').style.display = 'none';
+  document.getElementById('btnCopyResetResult').style.display = 'none';
   document.getElementById('btnResetStart').disabled = false;
   document.getElementById('btnResetStart').textContent = '开始改密';
   document.getElementById('btnResetCancel').textContent = '取消';
@@ -1223,14 +1227,17 @@ function renderResetProgress(tasks) {
     const t = tasks[email] || { status: 'pending', message: '等待中' };
     const cls = t.status === 'done' ? 'done' : t.status === 'failed' ? 'failed' : t.status === 'running' ? 'running' : '';
     const icon = t.status === 'done' ? '✓' : t.status === 'failed' ? '✗' : '…';
-    const pwdLine = (t.status === 'done' && t.new_password)
-      ? `<div class="reset-pwd">新密码: <code>${esc(t.new_password)}</code></div>`
-      : '';
+    let pwdLine = '';
+    if (t.status === 'done' && t.new_password) {
+      pwdLine = `<div class="reset-pwd">新密码: <code>${esc(t.new_password)}</code></div>`;
+    } else if (t.status === 'failed') {
+      pwdLine = `<div class="reset-pwd" style="color:var(--error)">密码: <code>error</code></div>`;
+    }
     html += `<div class="reset-item ${cls}">
       <div class="reset-dot ${cls}"></div>
       <div class="reset-email" title="${esc(email)}">${esc(email)}</div>
       <div class="reset-msg" title="${esc(t.message||'')}">
-        ${esc(t.message||t.status||'')}${pwdLine}
+        <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.message||t.status||'')}</div>${pwdLine}
       </div>
     </div>`;
   }
@@ -1254,6 +1261,7 @@ function handleResetMessage(msg) {
     renderResetProgress(msg.tasks || {});
     document.getElementById('btnResetStart').textContent = '完成';
     document.getElementById('btnResetCancel').textContent = '关闭';
+    document.getElementById('btnCopyResetResult').style.display = '';
     // 改密成功的账号，前端本地 history 密码列同步（后端也会推 history_update）
     const tasks = msg.tasks || {};
     let localChanged = false;
@@ -1266,6 +1274,35 @@ function handleResetMessage(msg) {
     }
     if (localChanged) renderHistory();
   }
+}
+
+function copyResetResult() {
+  const emails = _resetEmails.length ? _resetEmails : Object.keys(_resetTasks);
+  const lines = emails.map(email => {
+    const t = _resetTasks[email];
+    if (!t) return `${email}----error`;
+    const pwd = (t.status === 'done' && t.new_password) ? t.new_password : 'error';
+    return `${email}----${pwd}`;
+  });
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btnCopyResetResult');
+    const orig = btn.textContent;
+    btn.textContent = '已复制 ✓';
+    btn.style.color = 'var(--success)';
+    setTimeout(() => { btn.textContent = orig; btn.style.color = ''; }, 2000);
+  }).catch(() => {
+    // fallback: textarea 选中复制
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const btn = document.getElementById('btnCopyResetResult');
+    btn.textContent = '已复制 ✓';
+    setTimeout(() => { btn.textContent = '一键复制'; }, 2000);
+  });
 }
 
 // ── 打开浏览器 ──
