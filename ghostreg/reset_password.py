@@ -388,8 +388,9 @@ class JBPasswordResetter:
                 form_data[name] = val_match.group(1) if val_match else ""
 
         if not form_data:
-            # 兜底：JetBrains 最常见字段
-            form_data = {"password": new_password, "pass2": new_password}
+            # 页面没有任何 input 字段，说明重置链接已过期或无效（JetBrains 显示错误页而非表单）
+            logger.warning("  未找到表单字段（链接可能已过期），拒绝提交以避免误判")
+            return False
 
         logger.info(f"  提交表单字段: {list(form_data.keys())}")
 
@@ -406,22 +407,30 @@ class JBPasswordResetter:
                 timeout=30,
                 allow_redirects=True,
             )
-            logger.info(f"  POST 新密码: HTTP {r2.status_code}, URL: {str(r2.url)[:80]}")
+            final_url2 = str(r2.url)
+            logger.info(f"  POST 新密码: HTTP {r2.status_code}, URL: {final_url2[:80]}")
 
-            # 成功通常是 200（成功页面）或 302 重定向到 login/profile
-            if r2.status_code in (200, 302):
-                final = str(r2.url)
-                # 如果重定向到 login 或成功提示，视为成功
-                if "login" in final or "success" in final or "profile" in final or r2.status_code == 200:
-                    # 检查页面是否包含错误提示
-                    error_match = re.search(
-                        r'(?:error|invalid|expired|failed)[^<]{0,50}', r2.text, re.I
-                    )
-                    if error_match and "password" in r2.text.lower():
-                        logger.warning(f"  页面含错误: {error_match.group(0)}")
-                        return False
-                    logger.info("  ✓ 密码重置表单提交成功")
-                    return True
+            # 严格判断成功：URL 跳转到 login/success/profile，或页面无错误关键词
+            url_ok = any(k in final_url2 for k in ("login", "success", "profile", "account.jetbrains.com/?"))
+            # 检查页面是否包含错误提示（expired/invalid/failed/error）
+            error_match = re.search(
+                r'(?:error|invalid|expired|failed|no longer valid|link.*not valid)[^<]{0,80}',
+                r2.text, re.I
+            )
+            if error_match:
+                logger.warning(f"  页面含错误提示: {error_match.group(0)[:80]}")
+                return False
+            if r2.status_code in (200, 302) and url_ok:
+                logger.info("  ✓ 密码重置表单提交成功（URL 跳转确认）")
+                return True
+            # HTTP 200 且 URL 未变（仍在 reset 页面），视为失败
+            if r2.status_code == 200 and "reset" in final_url2:
+                logger.warning("  POST 后仍停留在 reset 页面，视为失败")
+                return False
+            # 其他 200：页面无错误关键词则允许通过
+            if r2.status_code == 200:
+                logger.info("  ✓ 密码重置表单提交成功（HTTP 200，无错误）")
+                return True
         except Exception as e:
             logger.warning(f"  POST 新密码失败: {e}")
 
