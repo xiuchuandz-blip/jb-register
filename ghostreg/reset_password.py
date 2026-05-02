@@ -141,14 +141,16 @@ def extract_reset_link(content: str) -> str | None:
 def _mail_id_to_timestamp(mail_id: str) -> float:
     """
     将 YYDS Mail 邮件 ID（格式 YYYYMMDDTHHMMSS-xxxx）解析为 UTC Unix 时间戳。
+    YYDS 服务器使用北京时间（UTC+8），需转换为 UTC 再比较。
     解析失败时返回 0（视为最老邮件，会被过滤掉）。
     """
     import datetime
     try:
-        # 取 T 前后拼合：20260429T024219
         dt_part = mail_id.split("-")[0]  # "20260429T024219"
         dt = datetime.datetime.strptime(dt_part, "%Y%m%dT%H%M%S")
-        return dt.replace(tzinfo=datetime.timezone.utc).timestamp()
+        # YYDS ID 时间戳为北京时间（UTC+8），转换为 UTC
+        cst = datetime.timezone(datetime.timedelta(hours=8))
+        return dt.replace(tzinfo=cst).timestamp()
     except Exception:
         return 0.0
 
