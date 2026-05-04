@@ -410,26 +410,30 @@ class JBPasswordResetter:
             final_url2 = str(r2.url)
             logger.info(f"  POST 新密码: HTTP {r2.status_code}, URL: {final_url2[:80]}")
 
-            # 严格判断成功：URL 跳转到 login/success/profile，或页面无错误关键词
-            url_ok = any(k in final_url2 for k in ("login", "success", "profile", "account.jetbrains.com/?"))
-            # 检查页面是否包含错误提示（expired/invalid/failed/error）
+            # 判断 URL 是否跳转到成功页面（licenses/profile/login/success 均为改密后的正常落地页）
+            url_ok = any(k in final_url2 for k in (
+                "licenses", "login", "success", "profile", "account.jetbrains.com/?"
+            ))
+            if r2.status_code in (200, 302) and url_ok:
+                logger.info(f"  ✓ 密码重置成功（URL 已跳转: {final_url2[:60]}）")
+                return True
+            # URL 未跳转（仍在 reset 页面），检查页面是否有真实错误文本
+            # 只在可见文本中查找（排除 JS 文件名、HTML 属性值等误报）
+            # 策略：去掉所有 <script>...</script> 和 HTML 标签后再匹配
+            text_only = re.sub(r'<script[^>]*>.*?</script>', '', r2.text, flags=re.S)
+            text_only = re.sub(r'<[^>]+>', ' ', text_only)
             error_match = re.search(
-                r'(?:error|invalid|expired|failed|no longer valid|link.*not valid)[^<]{0,80}',
-                r2.text, re.I
+                r'(?:invalid|expired|failed|no longer valid|link.*not valid|incorrect password)[^.\n]{0,80}',
+                text_only, re.I
             )
             if error_match:
                 logger.warning(f"  页面含错误提示: {error_match.group(0)[:80]}")
                 return False
-            if r2.status_code in (200, 302) and url_ok:
-                logger.info("  ✓ 密码重置表单提交成功（URL 跳转确认）")
-                return True
-            # HTTP 200 且 URL 未变（仍在 reset 页面），视为失败
             if r2.status_code == 200 and "reset" in final_url2:
                 logger.warning("  POST 后仍停留在 reset 页面，视为失败")
                 return False
-            # 其他 200：页面无错误关键词则允许通过
             if r2.status_code == 200:
-                logger.info("  ✓ 密码重置表单提交成功（HTTP 200，无错误）")
+                logger.info("  ✓ 密码重置表单提交成功（HTTP 200，无错误文本）")
                 return True
         except Exception as e:
             logger.warning(f"  POST 新密码失败: {e}")
