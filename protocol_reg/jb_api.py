@@ -40,6 +40,16 @@ class CaptchaTokenInvalidError(JBRegError):
     pass
 
 
+class DisposableEmailError(JBRegError):
+    """
+    JetBrains 返回 400 DisposableEmail —— 该域名被列为一次性邮箱。
+    上层应立即永久拉黑该域名，换一个新邮箱重试。
+    """
+    def __init__(self, domain: str, message: str = ""):
+        super().__init__(message or f"域名 {domain} 被 JetBrains 识别为一次性邮箱")
+        self.domain = domain
+
+
 class SessionsBucketHitError(JBRegError):
     """
     OAuth sessions IP 桶撞墙(429)。
@@ -245,7 +255,16 @@ class JBRegisterer:
         if resp.status_code == 200:
             logger.info("  200 → 直接通过（无需 captcha）")
             return
-        raise JBRegError(f"email/signup 首次提交异常: {resp.status_code}")
+        if resp.status_code == 400:
+            try:
+                err_code = resp.json().get("errorCode", "")
+            except Exception:
+                err_code = ""
+            if "DisposableEmail" in err_code or "DisposableEmail" in resp.text:
+                domain = email.split("@", 1)[1] if "@" in email else email
+                logger.warning(f"  400 DisposableEmail → 域名 {domain} 被 JB 拒绝")
+                raise DisposableEmailError(domain)
+        raise JBRegError(f"email/signup 首次提交异常: {resp.status_code} {resp.text[:120]}")
 
     def _verify_captcha(self, token: str):
         """Step 4: POST /api/auth/captcha/verify（带 429 重试）"""
@@ -289,6 +308,15 @@ class JBRegisterer:
         if resp.status_code == 200:
             logger.info("  200 → 验证码邮件已发送")
             return
+        if resp.status_code == 400:
+            try:
+                err_code = resp.json().get("errorCode", "")
+            except Exception:
+                err_code = ""
+            if "DisposableEmail" in err_code or "DisposableEmail" in resp.text:
+                domain = email.split("@", 1)[1] if "@" in email else email
+                logger.warning(f"  400 DisposableEmail → 域名 {domain} 被 JB 拒绝")
+                raise DisposableEmailError(domain)
         raise JBRegError(f"email/signup 重试失败: {resp.status_code} {resp.text[:200]}")
     
     @staticmethod

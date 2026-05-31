@@ -18,7 +18,7 @@ from typing import Callable
 from protocol_reg.client import new_session
 from protocol_reg.jb_api import (
     JBRegisterer, JBRegError, TencentCaptchaError, SessionsBucketHitError,
-    CaptchaTokenInvalidError,
+    CaptchaTokenInvalidError, DisposableEmailError,
     BASE_URL, RECAPTCHA_SITEKEY,
 )
 from protocol_reg.pool_client import PoolClient, Route
@@ -311,6 +311,24 @@ def register_single(
                 time.sleep(1)
                 continue
 
+            except DisposableEmailError as e:
+                # 域名被 JB 识别为一次性邮箱 → 永久拉黑该域名，换邮箱重试
+                try:
+                    from ghostreg import email_blacklist
+                    email_blacklist.report_failure(e.domain, reason="DisposableEmail(JB拒绝)")
+                    email_blacklist.report_failure(e.domain, reason="DisposableEmail(JB拒绝)")  # 两次触发阈值直接拉黑
+                    logger.warning(f"[Task {task_id}] 域名 {e.domain} 已永久拉黑，重新申请邮箱")
+                except Exception as ex:
+                    logger.warning(f"拉黑域名失败(忽略): {ex}")
+                # 删当前邮箱，走外层循环重新申请
+                if email:
+                    try:
+                        email_service.delete_email(email)
+                    except Exception:
+                        pass
+                bucket_outcome = "disposable"
+                break
+
             except TencentCaptchaError:
                 logger.warning(
                     f"[Task {task_id}] 遇到腾讯验证码 ({tencent_attempt+1}/{MAX_TENCENT_RETRIES})"
@@ -367,6 +385,17 @@ def register_single(
                 logger.error(f"[Task {task_id}] [FAIL] {result.error}")
                 break
             time.sleep(2)
+            continue
+
+        if bucket_outcome == "disposable":
+            # 域名被拉黑，重新申请邮箱（不计入 tencent 重试次数）
+            if tencent_attempt >= MAX_TENCENT_RETRIES:
+                result.error = "连续遇到 DisposableEmail，已无可用域名"
+                result.elapsed = time.time() - start
+                result.timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                logger.error(f"[Task {task_id}] [FAIL] {result.error}")
+                break
+            time.sleep(1)
             continue
 
     # 保存结果
