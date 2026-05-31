@@ -1,1 +1,32 @@
-{}
+{
+  "l8.jesys.net": {
+    "failures": 2,
+    "last_failure": 1780238226.8736959,
+    "blacklisted_at": 1780238226.8736966,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "9l.sdfe.app": {
+    "failures": 2,
+    "last_failure": 1780238236.0419018,
+    "blacklisted_at": 1780238236.041904,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "astralis.cn": {
+    "failures": 2,
+    "last_failure": 1780238236.0879545,
+    "blacklisted_at": 1780238236.0879552,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yyds.729406.xyz": {
+    "failures": 2,
+    "last_failure": 1780238294.4278495,
+    "blacklisted_at": 1780238294.42785,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "21sad.xyz": {
+    "failures": 2,
+    "last_failure": 1780238362.781644,
+    "blacklisted_at": 1780238362.7816455,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  }
+}
