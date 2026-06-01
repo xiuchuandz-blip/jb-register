@@ -796,5 +796,11 @@
     "last_failure": 1780301697.5472734,
     "blacklisted_at": 1780301697.547275,
     "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "aigts.top": {
+    "failures": 2,
+    "last_failure": 1780315875.972763,
+    "blacklisted_at": 1780315875.972765,
+    "last_reason": "DisposableEmail(JB拒绝)"
   }
 }
