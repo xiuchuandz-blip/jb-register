@@ -2382,66 +2382,85 @@ _JB_LOGIN_HEADERS = {
 }
 
 
-def _proto_login(email: str, password: str) -> dict:
+def _proto_login(email: str, password: str,
+                  worker_url: str = "", ladder_proxy: str = "") -> dict:
     """
     纯 HTTP 协议登录 JetBrains 账号（4 步，无浏览器）。
+
+    支持通过 CF Worker 代理，避免多账号并发时被 /api/auth/sessions 的 IP 限流（429）。
 
     Returns:
         {"ok": bool, "cookies": {name: value}, "message": str}
     """
-    from curl_cffi.requests import Session as CurlSession
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent))
+    from protocol_reg.client import new_session
 
-    s = CurlSession(impersonate="chrome136", verify=False, timeout=30)
-    try:
-        s.headers.update(_JB_LOGIN_HEADERS)
+    # 最多重试 3 次（429 退避）
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        s = new_session(verify=False, worker_url=worker_url, ladder_proxy=ladder_proxy)
+        try:
+            s.headers.update(_JB_LOGIN_HEADERS)
 
-        # Step 1: GET /login → CSRF cookie
-        r1 = s.get(f"{_JB_BASE}/login")
-        if r1.status_code != 200:
-            return {"ok": False, "cookies": {}, "message": f"GET /login 失败: {r1.status_code}"}
-        csrf = s.cookies.get("_st-JBA", "")
-        if not csrf:
-            return {"ok": False, "cookies": {}, "message": "未获取到 CSRF cookie"}
+            # Step 1: GET /login → CSRF cookie
+            r1 = s.get(f"{_JB_BASE}/login")
+            if r1.status_code != 200:
+                return {"ok": False, "cookies": {}, "message": f"GET /login 失败: {r1.status_code}"}
+            csrf = s.cookies.get("_st-JBA", "")
+            if not csrf:
+                return {"ok": False, "cookies": {}, "message": "未获取到 CSRF cookie"}
 
-        s.headers["X-XSRF-TOKEN"] = csrf
-        s.headers["Content-Type"] = "application/json"
+            s.headers["X-XSRF-TOKEN"] = csrf
+            s.headers["Content-Type"] = "application/json"
 
-        # Step 2: POST /api/auth/sessions
-        r2 = s.post(f"{_JB_BASE}/api/auth/sessions", json={})
-        if r2.status_code != 200:
-            return {"ok": False, "cookies": {}, "message": f"POST sessions 失败: {r2.status_code}"}
-        sid = r2.json().get("id", "")
+            # Step 2: POST /api/auth/sessions（最常被 429 的节点）
+            r2 = s.post(f"{_JB_BASE}/api/auth/sessions", json={})
+            if r2.status_code == 429:
+                wait_s = 5 * (attempt + 1)
+                logger.warning(f"[ProtoLogin] {email} POST sessions 429，{wait_s}s 后重试 ({attempt+1}/{MAX_RETRIES})")
+                time.sleep(wait_s)
+                continue
+            if r2.status_code != 200:
+                return {"ok": False, "cookies": {}, "message": f"POST sessions 失败: {r2.status_code}"}
+            sid = r2.json().get("id", "")
 
-        # Step 3: POST /api/auth/sessions/{id}/email/login
-        r3 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/email/login",
-                     json={"email": email})
-        if r3.status_code != 200:
-            return {"ok": False, "cookies": {}, "message": f"email/login 失败: {r3.status_code} {r3.text[:200]}"}
-        state = r3.json().get("state", "")
-        if state != "PASSWORD_REQUIRED":
-            return {"ok": False, "cookies": {}, "message": f"意外状态: {state}"}
+            # Step 3: POST /api/auth/sessions/{id}/email/login
+            r3 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/email/login",
+                         json={"email": email})
+            if r3.status_code != 200:
+                return {"ok": False, "cookies": {}, "message": f"email/login 失败: {r3.status_code} {r3.text[:200]}"}
+            state = r3.json().get("state", "")
+            if state != "PASSWORD_REQUIRED":
+                return {"ok": False, "cookies": {}, "message": f"意外状态: {state}（邮箱/账号不存在？）"}
 
-        # Step 4: POST /api/auth/sessions/{id}/password
-        r4 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/password",
-                     json={"password": password})
-        if r4.status_code != 200:
-            return {"ok": False, "cookies": {}, "message": f"password 失败: {r4.status_code} {r4.text[:200]}"}
-        j4 = r4.json()
-        if not j4.get("authenticated"):
-            return {"ok": False, "cookies": {}, "message": f"认证失败: {j4.get('state', 'unknown')}"}
+            # Step 4: POST /api/auth/sessions/{id}/password
+            r4 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/password",
+                         json={"password": password})
+            if r4.status_code != 200:
+                return {"ok": False, "cookies": {}, "message": f"password 失败: {r4.status_code} {r4.text[:200]}"}
+            j4 = r4.json()
+            if not j4.get("authenticated"):
+                return {"ok": False, "cookies": {}, "message": f"认证失败: {j4.get('state', 'unknown')}（密码错误？）"}
 
-        # 收集 cookies
-        cookies = dict(s.cookies)
-        return {"ok": True, "cookies": cookies, "message": "协议登录成功"}
+            # 收集 cookies
+            cookies = dict(s.cookies)
+            return {"ok": True, "cookies": cookies, "message": "协议登录成功"}
 
-    except Exception as e:
-        return {"ok": False, "cookies": {}, "message": str(e)}
-    finally:
-        s.close()
+        except Exception as e:
+            return {"ok": False, "cookies": {}, "message": str(e)}
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+
+    return {"ok": False, "cookies": {}, "message": f"POST sessions 连续 {MAX_RETRIES} 次 429，IP 被限流，请配置 CF Worker 代理"}
 
 
 def _proto_login_single(port: int, browser_type: str, email: str, password: str,
-                         country: str = "", auto_tokens: bool = False) -> dict:
+                         country: str = "", auto_tokens: bool = False,
+                         worker_url: str = "", ladder_proxy: str = "") -> dict:
     """
     协议登录单个账号 → 打开浏览器 → CDP 注入 Cookie → 导航到已登录页面。
 
@@ -2452,9 +2471,9 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
     """
     result = {"port": port, "email": email, "ok": False, "message": ""}
 
-    # Phase 1: 协议登录（纯 HTTP）
+    # Phase 1: 协议登录（纯 HTTP，走 CF Worker 代理避免 sessions 429）
     logger.info(f"[ProtoLogin:{port}] 协议登录 {email}...")
-    login_result = _proto_login(email, password)
+    login_result = _proto_login(email, password, worker_url=worker_url, ladder_proxy=ladder_proxy)
     if not login_result["ok"]:
         result["message"] = login_result["message"]
         logger.error(f"[ProtoLogin:{port}] 协议登录失败: {login_result['message']}")
@@ -2536,11 +2555,12 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
 
 def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
                       country: str = "", auto_tokens: bool = False,
-                      workers: int = 5) -> list[dict]:
+                      workers: int = 3) -> list[dict]:
     """
     协议批量登录：纯 HTTP 登录 + Cookie 注入浏览器。
 
     比浏览器自动化登录快 5-10 倍。
+    走 CF Worker 代理（若已配置）避免 sessions IP 429 限流。
 
     Args:
         accounts: [{"email": "xxx", "password": "xxx"}, ...]
@@ -2558,6 +2578,15 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
 
     workers = max(1, min(workers, 15))
 
+    # 从配置读取 Worker 代理（与协议注册共用同一个 Worker URL）
+    from . import config as _cfg
+    worker_url = _cfg.CF_WORKER_URL or ""
+    ladder_proxy = _cfg.CF_LADDER_PROXY or ""
+    if worker_url:
+        logger.info(f"[ProtoLogin] 使用 CF Worker 代理: {worker_url}")
+    else:
+        logger.warning("[ProtoLogin] 未配置 CF Worker，直连 JetBrains 可能被 sessions 429 限流")
+
     # 端口分配
     existing = scan_debug_browsers()
     used_ports = {b["port"] for b in existing}
@@ -2569,7 +2598,7 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
     if count == 1:
         acc = accounts[0]
         return [_proto_login_single(ports[0], browser_type, acc["email"], acc["password"],
-                                     country, auto_tokens)]
+                                     country, auto_tokens, worker_url, ladder_proxy)]
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     results = []
@@ -2578,14 +2607,15 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
         futures = {}
         for i, acc in enumerate(accounts):
             f = pool.submit(_proto_login_single, ports[i], browser_type,
-                           acc["email"], acc["password"], country, auto_tokens)
+                           acc["email"], acc["password"], country, auto_tokens,
+                           worker_url, ladder_proxy)
             futures[f] = ports[i]
-            # 错峰 0.5 秒（协议登录很快，不需要长间隔）
+            # 错峰间隔：每个任务间隔 2 秒，避免 sessions 桶被集中打满
             if i < count - 1:
-                time.sleep(0.5)
+                time.sleep(2)
 
         try:
-            for f in as_completed(futures, timeout=300):
+            for f in as_completed(futures, timeout=600):
                 try:
                     results.append(f.result())
                 except Exception as e:
