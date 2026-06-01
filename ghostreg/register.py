@@ -255,26 +255,86 @@ def cleanup_stale_browser_data() -> int:
 
 
 def _find_browser_path(browser_type: str) -> str | None:
-    """查找浏览器可执行文件路径"""
+    """
+    查找浏览器可执行文件路径。
+    优先级：settings.json 中的 browser_path → 标准安装位置（Windows / Linux / macOS）
+    """
     import os
-    candidates = {
-        "chrome": [
-            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
-        ],
-        "edge": [
-            os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
-            os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
-        ],
-        "brave": [
-            os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-            os.path.expandvars(r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe"),
-        ],
-    }
+    import platform
+    import shutil
+
+    # 0. 优先使用用户在 UI 中手动配置的路径
+    from . import config as _cfg
+    custom = _cfg._load_settings().get("browser_path", "").strip()
+    if custom and os.path.isfile(custom):
+        return custom
+
+    _sys = platform.system()
+
+    if _sys == "Windows":
+        candidates = {
+            "chrome": [
+                os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+                os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+            ],
+            "edge": [
+                os.path.expandvars(r"%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe"),
+                os.path.expandvars(r"%ProgramFiles%\Microsoft\Edge\Application\msedge.exe"),
+            ],
+            "brave": [
+                os.path.expandvars(r"%ProgramFiles%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                os.path.expandvars(r"%LocalAppData%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            ],
+        }
+    elif _sys == "Darwin":  # macOS
+        candidates = {
+            "chrome": [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                os.path.expanduser("~/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+            ],
+            "edge": [
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            ],
+            "brave": [
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+            ],
+        }
+    else:  # Linux
+        candidates = {
+            "chrome": [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/snap/bin/chromium",
+                "/usr/local/bin/google-chrome",
+            ],
+            "edge": [
+                "/usr/bin/microsoft-edge",
+                "/usr/bin/microsoft-edge-stable",
+            ],
+            "brave": [
+                "/usr/bin/brave-browser",
+                "/usr/bin/brave",
+            ],
+        }
+
     for path in candidates.get(browser_type, []):
         if os.path.isfile(path):
             return path
+
+    # 最后尝试 which / shutil.which（$PATH 中的任意名称）
+    which_names = {
+        "chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+        "edge":   ["microsoft-edge", "microsoft-edge-stable"],
+        "brave":  ["brave-browser", "brave"],
+    }
+    for name in which_names.get(browser_type, []):
+        found = shutil.which(name)
+        if found:
+            return found
+
     return None
 
 
@@ -287,14 +347,16 @@ def _create_browser(browser_type: str = "chrome") -> Chromium:
     co.incognito()
     _stealth_options(co)
 
-    # 设置浏览器路径
-    if browser_type != "chrome":
-        path = _find_browser_path(browser_type)
-        if path:
-            co.set_browser_path(path)
-            logger.info(f"[Browser] 使用 {browser_type}: {path}")
-        else:
-            logger.warning(f"[Browser] 未找到 {browser_type}，使用默认 Chrome")
+    # 显式查找并设置浏览器路径（所有类型都走这个逻辑，避免 DrissionPage 自动检测失败）
+    path = _find_browser_path(browser_type)
+    if path:
+        co.set_browser_path(path)
+        logger.info(f"[Browser] 使用 {browser_type}: {path}")
+    else:
+        logger.warning(
+            f"[Browser] 未找到 {browser_type} 可执行文件。"
+            f"请在「设置」→「浏览器路径」中手动填写，或安装 Chrome/Edge/Brave 到默认位置。"
+        )
 
     browser = Chromium(co)
     _apply_stealth(browser.latest_tab)
@@ -1969,10 +2031,9 @@ def _open_single_browser(port: int, browser_type: str, url: str) -> dict:
         co.incognito()
         _stealth_options(co)
 
-        if browser_type != "chrome":
-            path = _find_browser_path(browser_type)
-            if path:
-                co.set_browser_path(path)
+        path = _find_browser_path(browser_type)
+        if path:
+            co.set_browser_path(path)
 
         browser = Chromium(co)
         tab = browser.latest_tab
@@ -2092,10 +2153,9 @@ def _login_single(port: int, browser_type: str, email: str, password: str,
         co.incognito()
         _stealth_options(co)
 
-        if browser_type != "chrome":
-            path = _find_browser_path(browser_type)
-            if path:
-                co.set_browser_path(path)
+        path = _find_browser_path(browser_type)
+        if path:
+            co.set_browser_path(path)
 
         browser = Chromium(co)
         tab = browser.latest_tab
@@ -2406,10 +2466,9 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
         co.incognito()
         _stealth_options(co)
 
-        if browser_type != "chrome":
-            path = _find_browser_path(browser_type)
-            if path:
-                co.set_browser_path(path)
+        path = _find_browser_path(browser_type)
+        if path:
+            co.set_browser_path(path)
 
         browser = Chromium(co)
         tab = browser.latest_tab

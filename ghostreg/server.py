@@ -300,12 +300,33 @@ async def get_settings():
     key = config.YYDS_API_KEY
     masked = ""
     if key:
-        # 显示前 6 位 + **** + 后 4 位
         if len(key) > 10:
             masked = key[:6] + "****" + key[-4:]
         else:
             masked = key[:3] + "****"
-    return {"api_key_masked": masked, "api_key_set": bool(key)}
+    return {
+        "api_key_masked": masked,
+        "api_key_set": bool(key),
+        "browser_path": config.BROWSER_PATH,
+    }
+
+
+class BrowserPathRequest(BaseModel):
+    browser_path: str = ""
+
+
+@app.post("/api/settings/browser-path")
+async def set_browser_path(req: BrowserPathRequest):
+    """保存浏览器可执行文件路径"""
+    import os
+    path = req.browser_path.strip()
+    if path and not os.path.isfile(path):
+        return {"ok": False, "error": f"文件不存在: {path}"}
+    try:
+        config.save_browser_path(path)
+        return {"ok": True, "message": "已保存" if path else "已清空（将自动检测）"}
+    except Exception as e:
+        return {"ok": False, "error": f"保存失败: {e}"}
 
 
 @app.post("/api/settings/api-key")

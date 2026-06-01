@@ -63,6 +63,9 @@ def _save_settings(data: dict):
     SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+BROWSER_PATH = ""           # 浏览器可执行文件路径（用户手动配置，空则自动检测）
+
+
 def load_api_key() -> str:
     """从 settings.json 加载 YYDS Mail API Key"""
     global YYDS_API_KEY
@@ -77,6 +80,23 @@ def save_api_key(key: str):
     YYDS_API_KEY = key
     data = _load_settings()
     data["yyds_api_key"] = key
+    _save_settings(data)
+
+
+def load_browser_path() -> str:
+    """从 settings.json 加载浏览器路径"""
+    global BROWSER_PATH
+    data = _load_settings()
+    BROWSER_PATH = data.get("browser_path", "")
+    return BROWSER_PATH
+
+
+def save_browser_path(path: str):
+    """保存浏览器路径到 settings.json"""
+    global BROWSER_PATH
+    BROWSER_PATH = path.strip()
+    data = _load_settings()
+    data["browser_path"] = BROWSER_PATH
     _save_settings(data)
 
 
@@ -148,3 +168,4 @@ def save_cf_worker_url(worker_url: str):
 load_api_key()
 load_captcha_config()
 load_cf_config()
+load_browser_path()

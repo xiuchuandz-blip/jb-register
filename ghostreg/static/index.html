@@ -139,6 +139,23 @@
     <div id="apiKeyStatus" style="margin-top:8px;font-size:12px"></div>
   </div>
 
+  <div class="panel" style="border-color:var(--border)">
+    <div style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:10px">浏览器路径配置（可选）</div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8;margin-bottom:14px">
+      程序会自动检测系统中安装的 Chrome / Edge / Brave。<br>
+      如果自动检测失败（报错"browser executable file path cannot be found"），请手动填写浏览器可执行文件的完整路径后保存。<br>
+      <span style="color:var(--muted)">Windows 示例：<code style="background:rgba(255,255,255,.07);padding:1px 5px;border-radius:4px">C:\Program Files\Google\Chrome\Application\chrome.exe</code></span>
+    </div>
+    <div style="display:flex;gap:12px;align-items:flex-end">
+      <div class="form-group" style="flex:1">
+        <label>浏览器路径（留空 = 自动检测）</label>
+        <input type="text" id="browserPathInput" placeholder="留空则自动检测，例如 C:\...\chrome.exe" style="font-family:Consolas,monospace">
+      </div>
+      <button class="btn btn-primary" onclick="saveBrowserPath()" style="height:42px">保存</button>
+    </div>
+    <div id="browserPathStatus" style="margin-top:8px;font-size:12px"></div>
+  </div>
+
   <div class="panel" id="captchaPanel" style="border-color:var(--border)">
     <div id="captchaTitle" style="font-size:15px;font-weight:700;color:var(--muted);margin-bottom:10px">
       打码平台配置（全自动过验证码）
@@ -2030,7 +2047,48 @@ handleMessage = function(msg) {
   }
 };
 
+async function loadBrowserPath() {
+  try {
+    const resp = await fetch('/api/settings');
+    const data = await resp.json();
+    const inp = document.getElementById('browserPathInput');
+    const el = document.getElementById('browserPathStatus');
+    if (data.browser_path) {
+      inp.value = data.browser_path;
+      el.style.color = 'var(--success)';
+      el.textContent = '✓ 已配置: ' + data.browser_path;
+    } else {
+      el.style.color = 'var(--muted)';
+      el.textContent = '（未配置，将自动检测）';
+    }
+  } catch(e) {}
+}
+
+async function saveBrowserPath() {
+  const path = document.getElementById('browserPathInput').value.trim();
+  const el = document.getElementById('browserPathStatus');
+  try {
+    const resp = await fetch('/api/settings/browser-path', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ browser_path: path })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      el.style.color = 'var(--success)';
+      el.textContent = '✓ ' + data.message;
+    } else {
+      el.style.color = 'var(--error)';
+      el.textContent = '✗ ' + data.error;
+    }
+  } catch(e) {
+    el.style.color = 'var(--error)';
+    el.textContent = '请求失败: ' + e;
+  }
+}
+
 loadApiKey();
+loadBrowserPath();
 loadCaptchaConfig();
 loadCountries();
 cfLoadSettings();
