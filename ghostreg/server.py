@@ -317,14 +317,10 @@ class BrowserPathRequest(BaseModel):
 
 @app.post("/api/settings/browser-path")
 async def set_browser_path(req: BrowserPathRequest):
-    """保存浏览器可执行文件路径"""
-    import os
-    path = req.browser_path.strip()
-    if path and not os.path.isfile(path):
-        return {"ok": False, "error": f"文件不存在: {path}"}
+    """保存浏览器可执行文件路径（不做服务器端文件检查，浏览器在客户端本机上）"""
     try:
-        config.save_browser_path(path)
-        return {"ok": True, "message": "已保存" if path else "已清空（将自动检测）"}
+        config.save_browser_path(req.browser_path.strip())
+        return {"ok": True, "message": "已保存" if req.browser_path.strip() else "已清空（将自动检测）"}
     except Exception as e:
         return {"ok": False, "error": f"保存失败: {e}"}
 

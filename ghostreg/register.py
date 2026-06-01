@@ -131,6 +131,12 @@ def _stealth_options(co: "ChromiumOptions"):
     co.set_argument("--disable-popup-blocking")
     co.set_argument("--exclude-switches=enable-automation")
     co.set_argument("--disable-automation")
+    # 禁止 Google 账户登录/选择弹窗（新 profile 首次启动时会弹 "选择账户" 对话框）
+    co.set_argument("--bwsi")                         # Browse Without Sign-In
+    co.set_argument("--noerrdialogs")                 # 不弹错误/提示对话框
+    co.set_argument("--disable-features=SigninEmailConfirmation")
+    co.set_argument("--disable-sync")                 # 禁用 Google Sync
+    co.set_argument("--disable-background-networking") # 阻止账户相关后台请求
 
 
 def _apply_stealth(tab):
