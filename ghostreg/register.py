@@ -29,6 +29,119 @@ from . import captcha_service
 
 logger = logging.getLogger("ghostreg.register")
 
+# ── 指纹混淆 ─────────────────────────────────────────────────────────────────
+# 每次新文档加载前由 CDP 注入，覆盖所有常见自动化检测点
+
+_STEALTH_JS = r"""
+(function() {
+  // 1. 删除 navigator.webdriver
+  Object.defineProperty(navigator, 'webdriver', { get: () => undefined, configurable: true });
+
+  // 2. 伪造 navigator.plugins（三个真实 Chrome 插件）
+  const _fp = [
+    { name: 'Chrome PDF Plugin',  filename: 'internal-pdf-viewer',              description: 'Portable Document Format' },
+    { name: 'Chrome PDF Viewer',  filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+    { name: 'Native Client',      filename: 'internal-nacl-plugin',             description: '' },
+  ];
+  const pa = Object.create(PluginArray.prototype);
+  _fp.forEach(function(p, i) {
+    const pl = Object.create(Plugin.prototype);
+    Object.defineProperty(pl, 'name',        { value: p.name,        enumerable: true });
+    Object.defineProperty(pl, 'filename',    { value: p.filename,    enumerable: true });
+    Object.defineProperty(pl, 'description', { value: p.description, enumerable: true });
+    Object.defineProperty(pl, 'length',      { value: 1 });
+    pa[i] = pl;
+  });
+  Object.defineProperty(pa, 'length', { value: _fp.length });
+  Object.defineProperty(navigator, 'plugins', { get: () => pa, enumerable: true, configurable: true });
+
+  // 3. 语言 & mimeTypes
+  Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'], configurable: true });
+  Object.defineProperty(navigator, 'mimeTypes', { get: () => ({ length: 0 }), configurable: true });
+
+  // 4. chrome.runtime 存在（避免 undefined 检测）
+  window.chrome = window.chrome || {};
+  window.chrome.runtime = window.chrome.runtime || {
+    OnInstalledReason: {}, OnRestartRequiredReason: {},
+    PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {}
+  };
+  window.chrome.app = window.chrome.app || { isInstalled: false };
+
+  // 5. Permissions — 通知权限返回 default（非 denied）
+  if (window.Permissions && window.Permissions.prototype) {
+    var _origQ = window.Permissions.prototype.query;
+    window.Permissions.prototype.query = function(p) {
+      if (p && p.name === 'notifications') {
+        return Promise.resolve({ state: Notification.permission || 'default', onchange: null });
+      }
+      return _origQ.apply(this, arguments);
+    };
+  }
+
+  // 6. Canvas 轻微随机噪声（改变指纹哈希但不破坏渲染）
+  var _noise = (Math.random() * 4 | 0) - 2;  // -2 ~ +1
+  var _origGID = CanvasRenderingContext2D.prototype.getImageData;
+  CanvasRenderingContext2D.prototype.getImageData = function() {
+    var d = _origGID.apply(this, arguments);
+    for (var i = 0; i < d.data.length; i += 256) {
+      if (d.data[i] !== undefined)
+        d.data[i] = Math.max(0, Math.min(255, d.data[i] + _noise));
+    }
+    return d;
+  };
+
+  // 7. WebGL 渲染器字符串混淆
+  var _origGP = WebGLRenderingContext.prototype.getParameter;
+  WebGLRenderingContext.prototype.getParameter = function(p) {
+    if (p === 37445) return 'Intel Inc.';
+    if (p === 37446) return 'Intel Iris OpenGL Engine';
+    return _origGP.apply(this, arguments);
+  };
+  if (window.WebGL2RenderingContext) {
+    var _origGP2 = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function(p) {
+      if (p === 37445) return 'Intel Inc.';
+      if (p === 37446) return 'Intel Iris OpenGL Engine';
+      return _origGP2.apply(this, arguments);
+    };
+  }
+
+  // 8. 清理自动化全局属性
+  ['__selenium_evaluate','__webdriver_evaluate','__selenium_unwrapped','__webdriver_unwrapped',
+   '__driver_evaluate','__driver_unwrapped','__fxdriver_evaluate','__fxdriver_unwrapped',
+   'calledSelenium','_selenium','callPhantom','_phantom','phantom','__nightmare',
+   'domAutomation','domAutomationController','_Selenium_IDE_Recorder'].forEach(function(k) {
+    try { delete window[k]; } catch(e) {}
+    Object.defineProperty(window, k, { get: () => undefined, configurable: true });
+  });
+})();
+"""
+
+
+def _stealth_options(co: "ChromiumOptions"):
+    """为 ChromiumOptions 追加所有指纹混淆相关启动参数"""
+    co.set_argument("--disable-blink-features=AutomationControlled")
+    co.set_argument("--disable-features=IsolateOrigins,site-per-process")
+    co.set_argument("--disable-infobars")
+    co.set_argument("--password-store=basic")
+    co.set_argument("--use-mock-keychain")
+    co.set_argument("--no-first-run")
+    co.set_argument("--no-default-browser-check")
+    co.set_argument("--lang=en-US")
+    co.set_argument("--disable-popup-blocking")
+    co.set_argument("--exclude-switches=enable-automation")
+    co.set_argument("--disable-automation")
+
+
+def _apply_stealth(tab):
+    """向 tab 注入指纹混淆 JS（每次新文档加载前自动执行）"""
+    try:
+        tab.run_cdp("Page.addScriptToEvaluateOnNewDocument", source=_STEALTH_JS)
+        logger.debug("[Stealth] 指纹混淆脚本已注入")
+    except Exception as e:
+        logger.warning(f"[Stealth] CDP 注入失败(忽略): {e}")
+
+
 # reCAPTCHA 出现标记（线程安全，多窗口并发时各自独立）
 _thread_local = threading.local()
 
@@ -172,11 +285,7 @@ def _create_browser(browser_type: str = "chrome") -> Chromium:
     co.set_local_port(port)
     co.set_user_data_path(str(_BROWSER_DATA_DIR / str(port)))
     co.incognito()
-    co.set_argument("--disable-blink-features=AutomationControlled")
-    co.set_argument("--no-first-run")
-    co.set_argument("--no-default-browser-check")
-    co.set_argument("--lang=en-US")
-    co.set_argument("--disable-popup-blocking")
+    _stealth_options(co)
 
     # 设置浏览器路径
     if browser_type != "chrome":
@@ -188,6 +297,7 @@ def _create_browser(browser_type: str = "chrome") -> Chromium:
             logger.warning(f"[Browser] 未找到 {browser_type}，使用默认 Chrome")
 
     browser = Chromium(co)
+    _apply_stealth(browser.latest_tab)
     return browser
 
 
@@ -1731,58 +1841,83 @@ def scan_debug_browsers() -> list[dict]:
     results = []
     seen_ports = set()
 
-    # 用 PowerShell 获取 chrome.exe 和 msedge.exe 进程的 PID + 命令行
-    ps_script = (
-        'Get-WmiObject Win32_Process -Filter "name=\'chrome.exe\' or name=\'msedge.exe\'" '
-        '| Select-Object ProcessId,Name,CommandLine '
-        '| ForEach-Object { $_.ProcessId.ToString() + \"|\" + $_.Name + \"|\" + $_.CommandLine }'
-    )
-    try:
-        raw = subprocess.check_output(
-            ["powershell", "-NoProfile", "-Command", ps_script],
-            timeout=15, stderr=subprocess.DEVNULL
-        ).decode("utf-8", errors="ignore")
-    except Exception as e:
-        logger.warning(f"[Scan] PowerShell 扫描失败: {e}")
-        return results
+    import platform
+    _sys = platform.system()
 
-    for line in raw.strip().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parts = line.split("|", 2)
-        if len(parts) < 3:
-            continue
-
-        pid_str, proc_name, cmd_line = parts
+    if _sys == "Windows":
+        # Windows: 用 PowerShell 获取 chrome.exe 和 msedge.exe 进程的 PID + 命令行
+        ps_script = (
+            'Get-WmiObject Win32_Process -Filter "name=\'chrome.exe\' or name=\'msedge.exe\'" '
+            '| Select-Object ProcessId,Name,CommandLine '
+            '| ForEach-Object { $_.ProcessId.ToString() + \"|\" + $_.Name + \"|\" + $_.CommandLine }'
+        )
         try:
-            pid = int(pid_str)
-        except ValueError:
-            continue
+            raw = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", ps_script],
+                timeout=15, stderr=subprocess.DEVNULL
+            ).decode("utf-8", errors="ignore")
+        except Exception as e:
+            logger.warning(f"[Scan] PowerShell 扫描失败: {e}")
+            return results
 
-        if not cmd_line:
-            continue
-        # 跳过子进程（renderer、gpu、utility 等）
-        if "--type=" in cmd_line:
-            continue
+        for line in raw.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|", 2)
+            if len(parts) < 3:
+                continue
+            pid_str, proc_name, cmd_line = parts
+            try:
+                pid = int(pid_str)
+            except ValueError:
+                continue
+            if not cmd_line or "--type=" in cmd_line:
+                continue
+            m = re.search(r'--remote-debugging-port=(\d+)', cmd_line)
+            if not m:
+                continue
+            port = int(m.group(1))
+            if port in seen_ports:
+                continue
+            seen_ports.add(port)
+            browser_name = "edge" if "msedge" in proc_name.lower() else "chrome"
+            results.append({"pid": pid, "port": port, "browser": browser_name, "title": "", "url": ""})
 
-        m = re.search(r'--remote-debugging-port=(\d+)', cmd_line)
-        if not m:
-            continue
+    else:
+        # Linux / macOS: 用 ps aux 扫描
+        try:
+            raw = subprocess.check_output(
+                ["ps", "aux"],
+                timeout=10, stderr=subprocess.DEVNULL
+            ).decode("utf-8", errors="ignore")
+        except Exception as e:
+            logger.warning(f"[Scan] ps aux 扫描失败: {e}")
+            return results
 
-        port = int(m.group(1))
-        if port in seen_ports:
-            continue
-        seen_ports.add(port)
-
-        browser_name = "edge" if "msedge" in proc_name.lower() else "chrome"
-        results.append({
-            "pid": pid,
-            "port": port,
-            "browser": browser_name,
-            "title": "",
-            "url": "",
-        })
+        for line in raw.strip().splitlines():
+            # 只关心包含 remote-debugging-port 的行
+            if "--remote-debugging-port=" not in line:
+                continue
+            # 跳过子进程
+            if "--type=" in line:
+                continue
+            m_port = re.search(r'--remote-debugging-port=(\d+)', line)
+            if not m_port:
+                continue
+            port = int(m_port.group(1))
+            if port in seen_ports:
+                continue
+            seen_ports.add(port)
+            # 解析 PID（ps aux 第2列）
+            cols = line.split(None, 2)
+            try:
+                pid = int(cols[1])
+            except (IndexError, ValueError):
+                pid = 0
+            proc_lower = line.lower()
+            browser_name = "edge" if "msedge" in proc_lower else "chrome"
+            results.append({"pid": pid, "port": port, "browser": browser_name, "title": "", "url": ""})
 
     # 通过 DevTools HTTP API 并行获取每个浏览器的当前页面标题和 URL
     import httpx
@@ -1832,11 +1967,7 @@ def _open_single_browser(port: int, browser_type: str, url: str) -> dict:
         co.set_local_port(port)
         co.set_user_data_path(str(_BROWSER_DATA_DIR / str(port)))
         co.incognito()
-        co.set_argument("--disable-blink-features=AutomationControlled")
-        co.set_argument("--no-first-run")
-        co.set_argument("--no-default-browser-check")
-        co.set_argument("--lang=en-US")
-        co.set_argument("--disable-popup-blocking")
+        _stealth_options(co)
 
         if browser_type != "chrome":
             path = _find_browser_path(browser_type)
@@ -1845,6 +1976,7 @@ def _open_single_browser(port: int, browser_type: str, url: str) -> dict:
 
         browser = Chromium(co)
         tab = browser.latest_tab
+        _apply_stealth(tab)
 
         if url:
             tab.get(url)
@@ -1958,11 +2090,7 @@ def _login_single(port: int, browser_type: str, email: str, password: str,
         co.set_local_port(port)
         co.set_user_data_path(str(_BROWSER_DATA_DIR / str(port)))
         co.incognito()
-        co.set_argument("--disable-blink-features=AutomationControlled")
-        co.set_argument("--no-first-run")
-        co.set_argument("--no-default-browser-check")
-        co.set_argument("--lang=en-US")
-        co.set_argument("--disable-popup-blocking")
+        _stealth_options(co)
 
         if browser_type != "chrome":
             path = _find_browser_path(browser_type)
@@ -1971,6 +2099,7 @@ def _login_single(port: int, browser_type: str, email: str, password: str,
 
         browser = Chromium(co)
         tab = browser.latest_tab
+        _apply_stealth(tab)
 
         # Step 1: 打开登录页（带重试，网络不稳定时可能超时）
         logger.info(f"[Login:{port}] 打开登录页...")
@@ -2275,11 +2404,7 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
         co.set_local_port(port)
         co.set_user_data_path(str(_BROWSER_DATA_DIR / str(port)))
         co.incognito()
-        co.set_argument("--disable-blink-features=AutomationControlled")
-        co.set_argument("--no-first-run")
-        co.set_argument("--no-default-browser-check")
-        co.set_argument("--lang=en-US")
-        co.set_argument("--disable-popup-blocking")
+        _stealth_options(co)
 
         if browser_type != "chrome":
             path = _find_browser_path(browser_type)
@@ -2288,6 +2413,7 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
 
         browser = Chromium(co)
         tab = browser.latest_tab
+        _apply_stealth(tab)
 
         # 先导航到 JetBrains 域（必须在同域才能设 cookie）
         tab.get(f"{_JB_BASE}/favicon.ico")

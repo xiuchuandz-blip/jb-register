@@ -28,5 +28,773 @@
     "last_failure": 1780238362.781644,
     "blacklisted_at": 1780238362.7816455,
     "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "cx.lsa1230.dpdns.org": {
+    "failures": 2,
+    "last_failure": 1780238535.7195492,
+    "blacklisted_at": 1780238535.71955,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "kyx.zcyrus.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780238548.631927,
+    "blacklisted_at": 1780238548.6319277,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wedwe.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780246158.5516026,
+    "blacklisted_at": 1780246158.5516036,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-4.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780246158.6560814,
+    "blacklisted_at": 1780246158.6560822,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "det.indevs.in": {
+    "failures": 2,
+    "last_failure": 1780246225.5254169,
+    "blacklisted_at": 1780246225.5254183,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "oaifree.ai6.me": {
+    "failures": 2,
+    "last_failure": 1780246226.7973428,
+    "blacklisted_at": 1780246226.797344,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "fluix.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780246364.6250048,
+    "blacklisted_at": 1780246364.6250067,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wo4dashauige666.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780246432.0375192,
+    "blacklisted_at": 1780246432.03752,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.global-2.kpe.de5.net": {
+    "failures": 2,
+    "last_failure": 1780246437.479923,
+    "blacklisted_at": 1780246437.4799237,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mali.729406.xyz": {
+    "failures": 2,
+    "last_failure": 1780246499.214497,
+    "blacklisted_at": 1780246499.2144976,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "api-v1.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780246504.8882945,
+    "blacklisted_at": 1780246504.8882952,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.b-3.huggingface.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780246567.1741457,
+    "blacklisted_at": 1780246567.1741467,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.global-3.kpe.de5.net": {
+    "failures": 2,
+    "last_failure": 1780246572.0219762,
+    "blacklisted_at": 1780246572.0219772,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "temp2.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780246577.1124804,
+    "blacklisted_at": 1780246577.1124823,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "20031227.de5.net": {
+    "failures": 2,
+    "last_failure": 1780246632.7847526,
+    "blacklisted_at": 1780246632.7847545,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-6.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780246638.484947,
+    "blacklisted_at": 1780246638.4849477,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "legion.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780246643.3522694,
+    "blacklisted_at": 1780246643.35227,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "ys.deepl.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780246699.5222027,
+    "blacklisted_at": 1780246699.5222034,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "emoij.indevs.in": {
+    "failures": 2,
+    "last_failure": 1780246705.2570667,
+    "blacklisted_at": 1780246705.257068,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "0m0.app": {
+    "failures": 2,
+    "last_failure": 1780246710.2442894,
+    "blacklisted_at": 1780246710.24429,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yyds26.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780246766.7791824,
+    "blacklisted_at": 1780246766.7791834,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "kegui.net": {
+    "failures": 2,
+    "last_failure": 1780246770.6733115,
+    "blacklisted_at": 1780246770.6733122,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "iivyll.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780246833.890518,
+    "blacklisted_at": 1780246833.8905187,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "letv377.nsmjj.tech": {
+    "failures": 2,
+    "last_failure": 1780246849.2541459,
+    "blacklisted_at": 1780246849.254147,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "ai.2026157.xyz": {
+    "failures": 2,
+    "last_failure": 1780246906.738225,
+    "blacklisted_at": 1780246906.738226,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-8.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780246915.6224005,
+    "blacklisted_at": 1780246915.622401,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.xiaolajiao.de": {
+    "failures": 2,
+    "last_failure": 1780246982.4738777,
+    "blacklisted_at": 1780246982.4738784,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wbzqxl.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780247040.7119658,
+    "blacklisted_at": 1780247040.7119665,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "tm.622221.xyz": {
+    "failures": 2,
+    "last_failure": 1780247042.6573396,
+    "blacklisted_at": 1780247042.6573408,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "354674.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780247049.1219923,
+    "blacklisted_at": 1780247049.1219935,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "kioco.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780247108.2704947,
+    "blacklisted_at": 1780247108.2704954,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "chen-hai.sryze.cc": {
+    "failures": 2,
+    "last_failure": 1780262860.5538917,
+    "blacklisted_at": 1780262860.5538933,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "ajksdljaskldasd.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780262861.9810467,
+    "blacklisted_at": 1780262861.981048,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "naraka.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780262928.3084204,
+    "blacklisted_at": 1780262928.3084214,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "tm.spkun.org": {
+    "failures": 2,
+    "last_failure": 1780262994.4669986,
+    "blacklisted_at": 1780262994.4669993,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.xiaolajiaoyyds.com": {
+    "failures": 2,
+    "last_failure": 1780262998.6501896,
+    "blacklisted_at": 1780262998.6501906,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "1u.sdfe.app": {
+    "failures": 2,
+    "last_failure": 1780263064.5228326,
+    "blacklisted_at": 1780263064.522834,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "dmailp.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780263065.1401527,
+    "blacklisted_at": 1780263065.1401536,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xx.lucky04.dpdns.org": {
+    "failures": 2,
+    "last_failure": 1780263131.2394216,
+    "blacklisted_at": 1780263131.2394226,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "btzca8.nsmjj.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780263132.1563053,
+    "blacklisted_at": 1780263132.156306,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "sn6fk3.nsmjj.tech": {
+    "failures": 2,
+    "last_failure": 1780263133.0603404,
+    "blacklisted_at": 1780263133.0603414,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.capperflag.top": {
+    "failures": 2,
+    "last_failure": 1780263198.69292,
+    "blacklisted_at": 1780263198.692921,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "virtue1.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780263199.2744915,
+    "blacklisted_at": 1780263199.2744937,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xiejiang.us.ci": {
+    "failures": 2,
+    "last_failure": 1780263199.464571,
+    "blacklisted_at": 1780263199.4645715,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "vip.mssk.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780263265.7994938,
+    "blacklisted_at": 1780263265.799495,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "dschat.asia": {
+    "failures": 2,
+    "last_failure": 1780263266.2170637,
+    "blacklisted_at": 1780263266.2170644,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "15768.xyz": {
+    "failures": 2,
+    "last_failure": 1780263274.7707777,
+    "blacklisted_at": 1780263274.7707782,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mailsmtp.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780263331.893281,
+    "blacklisted_at": 1780263331.8932824,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yyds.adorable0v0.top": {
+    "failures": 2,
+    "last_failure": 1780263341.1073294,
+    "blacklisted_at": 1780263341.107331,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "vegan.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780263399.7639365,
+    "blacklisted_at": 1780263399.7639377,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yyds.mcmdo.com": {
+    "failures": 2,
+    "last_failure": 1780263402.0404665,
+    "blacklisted_at": 1780263402.0404673,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.magicyue.top": {
+    "failures": 2,
+    "last_failure": 1780263407.724839,
+    "blacklisted_at": 1780263407.7248406,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "lsp.lsa1230.dpdns.org": {
+    "failures": 2,
+    "last_failure": 1780263468.5731232,
+    "blacklisted_at": 1780263468.5731244,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "vip.mssk.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780263473.933235,
+    "blacklisted_at": 1780263473.9332356,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wcnmd11908.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780263536.3152485,
+    "blacklisted_at": 1780263536.3152492,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "p1aintiff.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780263537.839607,
+    "blacklisted_at": 1780263537.839608,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yydsmail.syrf109475.top": {
+    "failures": 2,
+    "last_failure": 1780263608.6829548,
+    "blacklisted_at": 1780263608.6829557,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "nb.syh5.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780263675.6255567,
+    "blacklisted_at": 1780263675.6255577,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "k0jbs5hm.ccwu.cc": {
+    "failures": 2,
+    "last_failure": 1780263742.6923666,
+    "blacklisted_at": 1780263742.6923676,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "arrowtuner.bbroot.com": {
+    "failures": 2,
+    "last_failure": 1780263744.317432,
+    "blacklisted_at": 1780263744.3174329,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "bsb.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780263752.1559792,
+    "blacklisted_at": 1780263752.1559806,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "3jsfuye.tech": {
+    "failures": 2,
+    "last_failure": 1780263810.7502763,
+    "blacklisted_at": 1780263810.7502773,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "lirsa.ggff.net": {
+    "failures": 2,
+    "last_failure": 1780263877.5294056,
+    "blacklisted_at": 1780263877.5294065,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wo1jiao2ren3jian4hu5.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780263879.8471918,
+    "blacklisted_at": 1780263879.8471925,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "r4.sdfe.app": {
+    "failures": 2,
+    "last_failure": 1780263945.0433223,
+    "blacklisted_at": 1780263945.043323,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "n5.jesys.net": {
+    "failures": 2,
+    "last_failure": 1780263946.5562994,
+    "blacklisted_at": 1780263946.5563004,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "dslab.icu": {
+    "failures": 2,
+    "last_failure": 1780263960.0412548,
+    "blacklisted_at": 1780263960.0412555,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.caiasian.cn": {
+    "failures": 2,
+    "last_failure": 1780264026.4203713,
+    "blacklisted_at": 1780264026.420372,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "api.qwen3-30b-a3b.xyz": {
+    "failures": 2,
+    "last_failure": 1780264093.0535836,
+    "blacklisted_at": 1780264093.0535848,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "asdedcccc.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780264160.6434686,
+    "blacklisted_at": 1780264160.6434696,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mete.bbroot.com": {
+    "failures": 2,
+    "last_failure": 1780264977.8600912,
+    "blacklisted_at": 1780264977.8600922,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mzl2wvp6.nsmjj.tech": {
+    "failures": 2,
+    "last_failure": 1780264980.8274982,
+    "blacklisted_at": 1780264980.8275,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-9.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780265045.4685092,
+    "blacklisted_at": 1780265045.4685109,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-5.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780265047.5400941,
+    "blacklisted_at": 1780265047.540095,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "vip.aoko.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265049.634868,
+    "blacklisted_at": 1780265049.634869,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "infinite-dusty.cfd": {
+    "failures": 2,
+    "last_failure": 1780265112.5402308,
+    "blacklisted_at": 1780265112.5402315,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "vnn.indevs.in": {
+    "failures": 2,
+    "last_failure": 1780265116.1559901,
+    "blacklisted_at": 1780265116.1559913,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "maika.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265117.2072334,
+    "blacklisted_at": 1780265117.2072344,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "miomail.indevs.in": {
+    "failures": 2,
+    "last_failure": 1780265180.1924245,
+    "blacklisted_at": 1780265180.1924253,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "gmail.h5ma.cn": {
+    "failures": 2,
+    "last_failure": 1780265182.889034,
+    "blacklisted_at": 1780265182.889035,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "1av2.lx1qzz.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780265185.451487,
+    "blacklisted_at": 1780265185.451488,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "tm.515666.xyz": {
+    "failures": 2,
+    "last_failure": 1780265246.447355,
+    "blacklisted_at": 1780265246.4473565,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "enajsndasd.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265314.2012389,
+    "blacklisted_at": 1780265314.2012398,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "rt.jesys.net": {
+    "failures": 2,
+    "last_failure": 1780265319.7351046,
+    "blacklisted_at": 1780265319.7351055,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "acgfun.eu.org": {
+    "failures": 2,
+    "last_failure": 1780265321.0240633,
+    "blacklisted_at": 1780265321.024064,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.global-1-la-finkles.xgai.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780265381.684844,
+    "blacklisted_at": 1780265381.6848447,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "desslee.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780265386.4354696,
+    "blacklisted_at": 1780265386.4354703,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "kokoa.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265448.8538866,
+    "blacklisted_at": 1780265448.8538878,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "qwer.729406.xyz": {
+    "failures": 2,
+    "last_failure": 1780265459.0665243,
+    "blacklisted_at": 1780265459.0665252,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "20220108.xyz": {
+    "failures": 2,
+    "last_failure": 1780265525.0338976,
+    "blacklisted_at": 1780265525.0338986,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "dsqcyy.com": {
+    "failures": 2,
+    "last_failure": 1780265525.2203796,
+    "blacklisted_at": 1780265525.220381,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xiejiang.site": {
+    "failures": 2,
+    "last_failure": 1780265586.124128,
+    "blacklisted_at": 1780265586.1241293,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail1yyds.hbkj.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265591.5196753,
+    "blacklisted_at": 1780265591.5196762,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "lux996.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780265591.6329718,
+    "blacklisted_at": 1780265591.6329725,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xiaolajiao.tech": {
+    "failures": 2,
+    "last_failure": 1780265653.356501,
+    "blacklisted_at": 1780265653.356502,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "acgfun.lol": {
+    "failures": 2,
+    "last_failure": 1780265728.2776597,
+    "blacklisted_at": 1780265728.2776604,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "10086.hzeg.eu.org": {
+    "failures": 2,
+    "last_failure": 1780265795.1261752,
+    "blacklisted_at": 1780265795.1261764,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "lajiao.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780265931.1400688,
+    "blacklisted_at": 1780265931.1400697,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.sunshine8.site": {
+    "failures": 2,
+    "last_failure": 1780265999.2043118,
+    "blacklisted_at": 1780265999.2043126,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "cscd.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780281862.8096802,
+    "blacklisted_at": 1780281862.809696,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "b.729406.xyz": {
+    "failures": 2,
+    "last_failure": 1780281866.6338406,
+    "blacklisted_at": 1780281866.6338425,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "licocon.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780281930.5812914,
+    "blacklisted_at": 1780281930.5812924,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "uniquefox.xyz": {
+    "failures": 2,
+    "last_failure": 1780282003.618998,
+    "blacklisted_at": 1780282003.6189992,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "corripo.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780282005.6201677,
+    "blacklisted_at": 1780282005.6201687,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "clllsy.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780282072.0275192,
+    "blacklisted_at": 1780282072.02752,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xiaolajiao.dedyn.io": {
+    "failures": 2,
+    "last_failure": 1780282140.618041,
+    "blacklisted_at": 1780282140.6180418,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "666162.xyz": {
+    "failures": 2,
+    "last_failure": 1780282142.5563376,
+    "blacklisted_at": 1780282142.5563385,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "osuzu.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780282207.215963,
+    "blacklisted_at": 1780282207.2159636,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-1.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780282208.7210195,
+    "blacklisted_at": 1780282208.7210202,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-10.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780282209.169497,
+    "blacklisted_at": 1780282209.169498,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "acgames.cc": {
+    "failures": 2,
+    "last_failure": 1780282274.4932716,
+    "blacklisted_at": 1780282274.4932728,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "xtxt.de5.net": {
+    "failures": 2,
+    "last_failure": 1780282416.0432353,
+    "blacklisted_at": 1780282416.0432358,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "908209381.shop": {
+    "failures": 2,
+    "last_failure": 1780299837.9606948,
+    "blacklisted_at": 1780299837.960696,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "coftens.asia": {
+    "failures": 2,
+    "last_failure": 1780299905.236466,
+    "blacklisted_at": 1780299905.2364686,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "579199.xyz": {
+    "failures": 2,
+    "last_failure": 1780299987.6750438,
+    "blacklisted_at": 1780299987.6750448,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "bcbc.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780300312.3595555,
+    "blacklisted_at": 1780300312.3595567,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "10011.hzeg.eu.org": {
+    "failures": 2,
+    "last_failure": 1780300336.1087976,
+    "blacklisted_at": 1780300336.1087992,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "stmail.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780300533.3596368,
+    "blacklisted_at": 1780300533.3596375,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "coftensbfq.asia": {
+    "failures": 2,
+    "last_failure": 1780300798.9795349,
+    "blacklisted_at": 1780300798.9795358,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "007.hzeg.eu.org": {
+    "failures": 2,
+    "last_failure": 1780300854.542475,
+    "blacklisted_at": 1780300854.5424767,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "deno.qzz.io": {
+    "failures": 2,
+    "last_failure": 1780300882.7873352,
+    "blacklisted_at": 1780300882.787336,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "flowmail.site": {
+    "failures": 2,
+    "last_failure": 1780301227.2395637,
+    "blacklisted_at": 1780301227.2395647,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.homehappy.eu.cc": {
+    "failures": 2,
+    "last_failure": 1780301289.4910796,
+    "blacklisted_at": 1780301289.4910815,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "hudfcaf.nsmjj.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780301323.982944,
+    "blacklisted_at": 1780301323.9829447,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.global-5.kpe.de5.net": {
+    "failures": 2,
+    "last_failure": 1780301382.107043,
+    "blacklisted_at": 1780301382.1070437,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "hgu717.ninja": {
+    "failures": 2,
+    "last_failure": 1780301493.652115,
+    "blacklisted_at": 1780301493.6521163,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.g-7.vactor1.us.ci": {
+    "failures": 2,
+    "last_failure": 1780301658.8467395,
+    "blacklisted_at": 1780301658.8467405,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "enzuojp.cc": {
+    "failures": 2,
+    "last_failure": 1780301697.5472734,
+    "blacklisted_at": 1780301697.547275,
+    "last_reason": "DisposableEmail(JB拒绝)"
   }
 }
