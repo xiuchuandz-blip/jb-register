@@ -802,5 +802,41 @@
     "last_failure": 1780315875.972763,
     "blacklisted_at": 1780315875.972765,
     "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yyds.950309.xyz": {
+    "failures": 2,
+    "last_failure": 1780315973.0559292,
+    "blacklisted_at": 1780315973.0559309,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail.fxtx.top": {
+    "failures": 2,
+    "last_failure": 1780316012.4230764,
+    "blacklisted_at": 1780316012.4230778,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "wyattcloud.vip": {
+    "failures": 2,
+    "last_failure": 1780316039.2409208,
+    "blacklisted_at": 1780316039.2409215,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "yy.lucky04.dpdns.org": {
+    "failures": 2,
+    "last_failure": 1780316048.6533544,
+    "blacklisted_at": 1780316048.6533556,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "mail1.zecous.top": {
+    "failures": 2,
+    "last_failure": 1780316079.5409248,
+    "blacklisted_at": 1780316079.5409257,
+    "last_reason": "DisposableEmail(JB拒绝)"
+  },
+  "thly.cc.cd": {
+    "failures": 2,
+    "last_failure": 1780316105.9564457,
+    "blacklisted_at": 1780316105.956447,
+    "last_reason": "DisposableEmail(JB拒绝)"
   }
 }
