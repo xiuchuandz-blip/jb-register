@@ -6,3 +6,9 @@ id = "lwdwgSLeDmlEHZxDoBtwF"
 uri = "file://output/recover_email_list.csv"
 type = "table"
 title = "最近100个邮箱列表(已排除58个协议邮箱)"
+
+[[outputs]]
+id = "WoN-8-smFRJSbyq1NrkAB"
+uri = "file://output/recover_email_list.md"
+type = "text"
+title = "待找回账号候选列表 (Markdown)"
