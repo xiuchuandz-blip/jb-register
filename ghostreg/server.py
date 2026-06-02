@@ -1463,6 +1463,7 @@ def _run_proto_batch(count: int, password: str, workers: int,
 # 改密任务全局状态
 _reset_tasks: dict[str, dict] = {}   # email → {status, message, ok}
 _reset_running = False
+_reset_cancel = False   # 用户点"停止"时置 True，循环与轮询据此中断
 
 
 class ResetPasswordRequest(BaseModel):
@@ -1474,7 +1475,7 @@ class ResetPasswordRequest(BaseModel):
 @app.post("/api/reset-password")
 async def reset_password_batch(req: ResetPasswordRequest):
     """批量通过邮箱改密接口"""
-    global _reset_running, _reset_tasks
+    global _reset_running, _reset_tasks, _reset_cancel
 
     if _reset_running:
         return {"ok": False, "error": "已有改密任务在运行，请等待完成"}
@@ -1486,6 +1487,7 @@ async def reset_password_batch(req: ResetPasswordRequest):
         return {"ok": False, "error": "新密码长度至少 8 位"}
 
     _reset_running = True
+    _reset_cancel = False
     _reset_tasks = {}
     for email in req.emails:
         _reset_tasks[email] = {"email": email, "status": "pending", "message": "等待中", "ok": None, "new_password": ""}
@@ -1507,6 +1509,17 @@ async def reset_status():
     return {"running": _reset_running, "tasks": _reset_tasks}
 
 
+@app.post("/api/reset-cancel")
+async def reset_cancel():
+    """停止正在运行的改密任务：标记取消，正在轮询的账号会立即中断，
+    尚未开始的账号会被跳过。"""
+    global _reset_cancel
+    if not _reset_running:
+        return {"ok": False, "error": "当前没有正在运行的改密任务"}
+    _reset_cancel = True
+    return {"ok": True}
+
+
 def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
     """后台线程：逐个执行改密任务（每个账号随机生成独立密码）"""
     global _reset_running, _reset_tasks
@@ -1521,6 +1534,15 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
 
     for email in emails:
+        # 用户已点"停止"：尚未开始的账号标记为已取消并跳过
+        if _reset_cancel:
+            _reset_tasks[email]["status"] = "failed"
+            _reset_tasks[email]["message"] = "已取消"
+            _reset_tasks[email]["ok"] = False
+            _reset_tasks[email]["new_password"] = ""
+            _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
+            continue
+
         # 每个账号独立生成随机密码
         task_pwd = _random_password()
         _reset_tasks[email]["new_password"] = task_pwd
@@ -1533,6 +1555,7 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
             new_password=task_pwd,
             progress_cb=_progress,
             poll_timeout=float(poll_timeout),
+            cancel_cb=lambda: _reset_cancel,
         )
 
         _reset_tasks[email]["ok"] = result.get("ok")
@@ -1541,6 +1564,10 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
         if not result.get("ok"):
             _reset_tasks[email]["new_password"] = ""   # 失败则不展示密码
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
+
+        # 用户取消则立即收尾，不再等待间隔
+        if _reset_cancel:
+            continue
 
         # 每个账号间稍微间隔，避免过快触发速率限制
         time.sleep(3)

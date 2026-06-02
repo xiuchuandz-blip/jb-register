@@ -27,6 +27,11 @@ logger = logging.getLogger("ghostreg.reset_password")
 
 BASE_URL = "https://account.jetbrains.com"
 
+
+class ResetCancelled(Exception):
+    """用户主动取消改密任务时抛出。"""
+    pass
+
 # 持久化 token 缓存文件（防止 app 重启后 token 丢失）
 _TOKEN_CACHE_FILE = Path(__file__).parent.parent / "output" / "email_token_cache.json"
 
@@ -156,7 +161,8 @@ def _mail_id_to_timestamp(mail_id: str) -> float:
 
 
 def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
-                          since: float = 0.0, known_ids: set | None = None) -> dict:
+                          since: float = 0.0, known_ids: set | None = None,
+                          cancel_cb=None) -> dict:
     """
     轮询邮件箱，寻找 JetBrains 密码重置邮件。
     known_ids: 请求发起前邮箱中已存在的邮件 ID 集合。轮询时只认"新出现"
@@ -177,6 +183,8 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
     )
 
     while time.time() < deadline:
+        if cancel_cb and cancel_cb():
+            raise ResetCancelled("用户取消改密任务")
         attempt += 1
         try:
             mails = get_mails(email)
@@ -202,12 +210,22 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
             subject = mail.get("subject", "") or ""
             full_text = subject + " " + content
 
-            # 优先找重置链接
+            # 优先找重置链接（只有密码重置邮件才含此链接，最可靠）
             link = extract_reset_link(full_text)
             if link:
                 return {"type": "link", "value": link}
 
-            # 其次找验证码（OTP）
+            # 跳过"登录验证码"邮件：JetBrains 风控会单独发
+            # "Confirmation code to log in to your JetBrains Account"，
+            # 它的 6 位码是登录用的，不是改密用的。若误当成重置码会改密失败。
+            subj_lower = subject.lower()
+            is_login_code = ("log in" in subj_lower or "login" in subj_lower
+                             or "sign in" in subj_lower) and "reset" not in subj_lower
+            if is_login_code:
+                logger.info(f"跳过登录验证码邮件（非改密邮件）: {subject[:60]}")
+                continue
+
+            # 其次找验证码（OTP）——仅来自非登录验证码邮件
             code = extract_verification_code(full_text)
             if code:
                 return {"type": "code", "value": code}
@@ -495,6 +513,7 @@ def reset_account_password(
     new_password: str,
     progress_cb=None,
     poll_timeout: float = 300,
+    cancel_cb=None,
 ) -> dict:
     """
     完整重置流程:
@@ -576,7 +595,8 @@ def reset_account_password(
 
         # Step 3: 轮询邮件（只认请求后新出现的邮件，known_ids 为请求前快照）
         result = poll_email_for_reset(email, timeout=poll_timeout, interval=5,
-                                      since=reset_request_time, known_ids=known_ids)
+                                      since=reset_request_time, known_ids=known_ids,
+                                      cancel_cb=cancel_cb)
         log(f"收到重置邮件 (类型: {result['type']})", "got_mail")
 
         # Step 4: 完成重置
@@ -598,6 +618,8 @@ def reset_account_password(
                          "JetBrains API 端点可能已更新，请尝试在浏览器手动完成。"
             }
 
+    except ResetCancelled:
+        return {"ok": False, "cancelled": True, "error": "已取消"}
     except TimeoutError:
         return {"ok": False, "error": f"等待重置邮件超时 ({poll_timeout}s)，请检查邮箱 API Key 是否有效"}
     except Exception as e:

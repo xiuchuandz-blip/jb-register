@@ -430,7 +430,7 @@
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-secondary" onclick="closeResetModal()" id="btnResetCancel">取消</button>
+        <button class="btn btn-secondary" onclick="onResetCancelClick()" id="btnResetCancel">取消</button>
         <button class="btn btn-primary" onclick="startResetPassword()" id="btnResetStart">开始改密</button>
       </div>
     </div>
@@ -1182,6 +1182,31 @@ function openResetModal(emails) {
   document.getElementById('resetModal').classList.add('active');
 }
 
+async function onResetCancelClick() {
+  const cancelBtn = document.getElementById('btnResetCancel');
+  // 已完成（按钮显示"关闭"）→ 直接关闭弹窗
+  if (cancelBtn.textContent === '关闭') { closeResetModal(); return; }
+
+  const running = document.getElementById('resetProgressArea').style.display !== 'none';
+  if (running) {
+    // 正在改密 → 真正停止后台任务
+    if (!confirm('确定停止当前改密任务？正在处理的账号会立即中断，未开始的账号将被跳过。')) return;
+    cancelBtn.disabled = true;
+    cancelBtn.textContent = '停止中...';
+    try {
+      const resp = await fetch('/api/reset-cancel', { method: 'POST' });
+      const data = await resp.json();
+      if (!data.ok) { alert(data.error || '停止失败'); cancelBtn.disabled = false; cancelBtn.textContent = '取消'; }
+    } catch(e) {
+      alert('停止请求失败: ' + e.message);
+      cancelBtn.disabled = false; cancelBtn.textContent = '取消';
+    }
+    return;
+  }
+  // 尚未开始 → 关闭弹窗
+  closeResetModal();
+}
+
 function closeResetModal() {
   if (document.getElementById('btnResetStart').disabled &&
       document.getElementById('btnResetCancel').textContent === '关闭') {
@@ -1277,7 +1302,9 @@ function handleResetMessage(msg) {
   } else if (msg.type === 'reset_completed') {
     renderResetProgress(msg.tasks || {});
     document.getElementById('btnResetStart').textContent = '完成';
-    document.getElementById('btnResetCancel').textContent = '关闭';
+    const cancelBtn = document.getElementById('btnResetCancel');
+    cancelBtn.disabled = false;
+    cancelBtn.textContent = '关闭';
     document.getElementById('btnCopyResetResult').style.display = '';
     // 改密成功的账号，前端本地 history 密码列同步（后端也会推 history_update）
     const tasks = msg.tasks || {};
