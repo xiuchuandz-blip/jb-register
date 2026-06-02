@@ -12,3 +12,9 @@ id = "WoN-8-smFRJSbyq1NrkAB"
 uri = "file://output/recover_email_list.md"
 type = "text"
 title = "待找回账号候选列表 (Markdown)"
+
+[[outputs]]
+id = "tC4q3a_zmKwGYj_7HLJOJ"
+uri = "file://output/all_mailboxes.xlsx"
+type = "table"
+title = "全部邮箱列表 (443个, Excel)"
