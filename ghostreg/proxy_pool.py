@@ -424,7 +424,17 @@ class SimpleWorkerSession:
                 r = self._s.request(method, worker_req_url,
                                     headers=req_headers, data=raw, **kwargs)
             elif data is not None:
-                raw = data if isinstance(data, bytes) else str(data).encode()
+                # dict → application/x-www-form-urlencoded（表单 POST，如忘记密码）
+                # 不能用 str(dict)，否则发出的是 Python 字典字面量导致 400。
+                if isinstance(data, dict):
+                    from urllib.parse import urlencode
+                    raw = urlencode(data).encode()
+                    req_headers.setdefault(
+                        "Content-Type", "application/x-www-form-urlencoded")
+                elif isinstance(data, bytes):
+                    raw = data
+                else:
+                    raw = str(data).encode()
                 r = self._s.request(method, worker_req_url,
                                     headers=req_headers, data=raw, **kwargs)
             else:

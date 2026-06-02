@@ -1529,6 +1529,15 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
 
     from .reset_password import reset_account_password
 
+    # 读取 CF Worker 代理配置：启用时改密"触发忘记密码邮件"环节走代理，
+    # 每次经不同出口 IP，绕开 JetBrains 对单一来源 IP 的发信速率限制。
+    config.load_cf_config()
+    reset_worker_url = config.CF_WORKER_URL if config.CF_PROXY_ENABLED else ""
+    if reset_worker_url:
+        logger.info(f"[改密] 启用 CF Worker 代理触发: {reset_worker_url}")
+    else:
+        logger.info("[改密] 未启用代理，直连触发（可能被 JB 按 IP 限流）")
+
     def _progress(info: dict):
         email = info.get("email", "")
         if email in _reset_tasks:
@@ -1559,6 +1568,7 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
             progress_cb=_progress,
             poll_timeout=float(poll_timeout),
             cancel_cb=lambda: _reset_cancel,
+            worker_url=reset_worker_url,
         )
 
         _reset_tasks[email]["ok"] = result.get("ok")

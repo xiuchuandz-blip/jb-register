@@ -241,8 +241,32 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
 class JBPasswordResetter:
     """纯 HTTP 方式触发 JetBrains 忘记密码 + 完成密码重置。"""
 
-    def __init__(self):
+    def __init__(self, worker_url: str = ""):
+        # self.s：直连会话，用于"完成改密"(complete_reset_via_link 依赖 resp.url，
+        # 代理会话的 _WorkersResponse 没有 .url；且这一步不受 JB 邮件速率限制)。
         self.s = CurlSession(impersonate="chrome120")
+
+        # self.trigger_s：触发"忘记密码"邮件的会话。这一步是被 JetBrains 按
+        # 来源 IP 限流的环节——同一 Replit IP 连续请求很快就被风控，导致重置
+        # 邮件不再发出。配置了 CF Worker 代理时改走代理(每次经不同出口 IP)，
+        # 从而绕开 IP 限流。代理会话仅返回 status_code/text/json/cookies，
+        # 而 request_forgot_password / _request_via_session / complete_reset_via_otp
+        # 恰好只用到这些字段，完全兼容。
+        if worker_url:
+            try:
+                from protocol_reg.client import new_session
+                self.trigger_s = new_session(
+                    verify=False,
+                    worker_url=worker_url,
+                    ladder_proxy=getattr(config, "CF_LADDER_PROXY", "") or "",
+                )
+                logger.info(f"改密触发走 CF Worker 代理: {worker_url}")
+            except Exception as e:
+                logger.warning(f"代理会话创建失败，回退直连: {e}")
+                self.trigger_s = self.s
+        else:
+            self.trigger_s = self.s
+
         self.csrf = ""
         self.session_id = ""
 
@@ -265,7 +289,7 @@ class JBPasswordResetter:
         """
         try:
             # Step 1: 获取忘记密码页面，提取 CSRF token 和 form action
-            r = self.s.get(
+            r = self.trigger_s.get(
                 f"{BASE_URL}/forgot-password",
                 headers=self._browser_headers(),
                 timeout=20,
@@ -287,7 +311,7 @@ class JBPasswordResetter:
             logger.info(f"  Form action: {post_url[:80]}...")
 
             # Step 2: 提交表单（字段名为 username，支持邮箱或用户名）
-            r2 = self.s.post(
+            r2 = self.trigger_s.post(
                 post_url,
                 data={"username": email},
                 headers={
@@ -312,13 +336,13 @@ class JBPasswordResetter:
     def _request_via_session(self, email: str) -> bool:
         """备用方案：通过 session API 触发登录 OTP（用于后续验证）"""
         try:
-            r = self.s.get(f"{BASE_URL}/login", headers=self._browser_headers(), timeout=20)
-            csrf = self.s.cookies.get("_st-JBA", "")
+            r = self.trigger_s.get(f"{BASE_URL}/login", headers=self._browser_headers(), timeout=20)
+            csrf = self.trigger_s.cookies.get("_st-JBA", "")
             hdrs = {"Content-Type": "application/json"}
             if csrf:
                 hdrs["X-XSRF-TOKEN"] = csrf
 
-            resp = self.s.post(
+            resp = self.trigger_s.post(
                 f"{BASE_URL}/api/auth/sessions", headers=hdrs, timeout=20,
             )
             if resp.status_code != 200:
@@ -329,7 +353,7 @@ class JBPasswordResetter:
             logger.info(f"  备用 Session ID: {self.session_id}")
 
             for suffix in ("email/login",):
-                r2 = self.s.post(
+                r2 = self.trigger_s.post(
                     f"{BASE_URL}/api/auth/sessions/{self.session_id}/{suffix}",
                     headers=hdrs,
                     json={"email": email},
@@ -476,7 +500,7 @@ class JBPasswordResetter:
             return False
         json_hdrs = {"Content-Type": "application/json", "Accept": "application/json"}
         try:
-            r = self.s.post(
+            r = self.trigger_s.post(
                 f"{BASE_URL}/api/auth/sessions/{self.session_id}/otp/email",
                 headers=json_hdrs,
                 json={"oneTimePassword": otp},
@@ -487,7 +511,7 @@ class JBPasswordResetter:
                 return False
 
             # 获取认证 token/cookie 后改密
-            csrf = self.s.cookies.get("_st-JBA", "")
+            csrf = self.trigger_s.cookies.get("_st-JBA", "")
             if csrf:
                 json_hdrs["X-XSRF-TOKEN"] = csrf
             change_candidates = [
@@ -497,7 +521,9 @@ class JBPasswordResetter:
                  {"newPassword": new_password}),
             ]
             for url, body in change_candidates:
-                cr = self.s.post(url, headers=json_hdrs, json=body, timeout=20)
+                # 用同一个 trigger_s 会话改密：OTP 验证产生的认证 cookie 在该
+                # 会话的 cookie jar 中，换用 self.s 会丢失登录态导致改密失败。
+                cr = self.trigger_s.post(url, headers=json_hdrs, json=body, timeout=20)
                 logger.info(f"  改密 {url}: HTTP {cr.status_code}")
                 if cr.status_code in (200, 204):
                     return True
@@ -514,6 +540,7 @@ def reset_account_password(
     progress_cb=None,
     poll_timeout: float = 300,
     cancel_cb=None,
+    worker_url: str = "",
 ) -> dict:
     """
     完整重置流程:
@@ -586,7 +613,7 @@ def reset_account_password(
             known_ids = {m.get("id") for m in get_mails(email) if m.get("id")}
         except Exception:
             known_ids = set()
-        resetter = JBPasswordResetter()
+        resetter = JBPasswordResetter(worker_url=worker_url)
         ok = resetter.request_forgot_password(email)
         if not ok:
             return {"ok": False, "error": "触发 JetBrains 忘记密码失败，可能该邮箱不存在或 API 端点已变更"}
