@@ -1486,22 +1486,25 @@ async def reset_password_batch(req: ResetPasswordRequest):
     if not req.new_password or len(req.new_password) < 8:
         return {"ok": False, "error": "新密码长度至少 8 位"}
 
+    # 去重：同一邮箱只改一次，避免重复改密浪费限流额度、产生重复记录
+    emails = list(dict.fromkeys(req.emails))
+
     _reset_running = True
     _reset_cancel = False
     _reset_tasks = {}
-    for email in req.emails:
+    for email in emails:
         _reset_tasks[email] = {"email": email, "status": "pending", "message": "等待中", "ok": None, "new_password": ""}
 
     _broadcast_from_thread({"type": "reset_started", "tasks": _reset_tasks})
 
     thread = threading.Thread(
         target=_run_reset_batch,
-        args=(req.emails, req.new_password, req.poll_timeout),
+        args=(emails, req.new_password, req.poll_timeout),
         daemon=True,
     )
     thread.start()
 
-    return {"ok": True, "count": len(req.emails)}
+    return {"ok": True, "count": len(emails)}
 
 
 @app.get("/api/reset-status")
@@ -1563,6 +1566,10 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
         _reset_tasks[email]["message"] = result.get("message") or result.get("error") or ""
         if not result.get("ok"):
             _reset_tasks[email]["new_password"] = ""   # 失败则不展示密码
+        else:
+            # 关键：成功后立即落盘。密码改在 JetBrains 端不可逆，若等整批结束
+            # 才写文件，一旦中途重启/崩溃，已改好的密码就永久丢失（账号被锁）。
+            _persist_reset_success(email, task_pwd)
         _broadcast_from_thread({"type": "reset_update", "tasks": _reset_tasks})
 
         # 用户取消则立即收尾，不再等待间隔
@@ -1575,50 +1582,40 @@ def _run_reset_batch(emails: list[str], new_password: str, poll_timeout: int):
     _reset_running = False
     _broadcast_from_thread({"type": "reset_completed", "tasks": _reset_tasks})
 
-    # 改密成功的账号，更新 history 中的密码（用各自的随机密码）
-    _apply_reset_to_history(emails)
 
+def _persist_reset_success(email: str, password: str):
+    """单个账号改密成功后【立即】落盘：追加 reset_results.json + 更新历史记录。
 
-def _apply_reset_to_history(emails: list[str]):
-    """将改密成功的账号更新到 history 记录（浏览器+协议）中，各自使用生成的随机密码"""
-    # 构建 email → new_password 映射（仅成功且有密码的）
-    pwd_map = {
-        e: t["new_password"]
-        for e, t in _reset_tasks.items()
-        if t.get("ok") and t.get("new_password")
-    }
-    if not pwd_map:
-        return
-
-    success_emails = set(pwd_map.keys())
-
-    # ── 无论是否在历史里，都追加写入 reset_results.json（防页面刷新丢失） ──
+    必须每成功一个就调用一次。改密在 JetBrains 端是不可逆的（旧密码已失效），
+    若等整批结束才统一写文件，一旦批次中途被重启/崩溃/杀进程打断，
+    那些已经改好的随机新密码就会永久丢失，账号被锁——只能重新改密找回。
+    """
+    import datetime as _dt
     RESET_RESULTS_JSON = DATA_DIR / "reset_results.json"
-    try:
-        import datetime as _dt
-        existing = []
-        if RESET_RESULTS_JSON.exists():
-            try:
-                existing = json.loads(RESET_RESULTS_JSON.read_text(encoding="utf-8"))
-            except Exception:
-                existing = []
-        ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        for em, pwd in pwd_map.items():
-            existing.append({"email": em, "password": pwd, "reset_time": ts})
-        RESET_RESULTS_JSON.write_text(
-            json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
-        logger.info(f"[改密] 结果已追加写入 reset_results.json ({len(pwd_map)} 条)")
-    except Exception as _e:
-        logger.warning(f"[改密] 写入 reset_results.json 失败: {_e}")
-
     changed = False
+    proto_changed = False
     with _file_lock:
-        # ── 浏览器注册历史 ──
+        # ── 1) 追加写入 reset_results.json（密码的权威记录，最优先保护） ──
+        try:
+            existing = []
+            if RESET_RESULTS_JSON.exists():
+                try:
+                    existing = json.loads(RESET_RESULTS_JSON.read_text(encoding="utf-8"))
+                except Exception:
+                    existing = []
+            ts = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            existing.append({"email": email, "password": password, "reset_time": ts})
+            RESET_RESULTS_JSON.write_text(
+                json.dumps(existing, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            logger.info(f"[改密] {email} 成功，已即时写入 reset_results.json")
+        except Exception as _e:
+            logger.warning(f"[改密] 写入 reset_results.json 失败: {_e}")
+
+        # ── 2) 更新浏览器注册历史 ──
         for h in state.history:
-            em = h.get("email")
-            if em in success_emails:
-                h["password"] = pwd_map[em]
+            if h.get("email") == email:
+                h["password"] = password
                 changed = True
         if changed:
             ACCOUNTS_JSON.write_text(
@@ -1626,17 +1623,15 @@ def _apply_reset_to_history(emails: list[str]):
                 encoding="utf-8",
             )
 
-        # ── 协议注册历史 ──
-        proto_changed = False
+        # ── 3) 更新协议注册历史 ──
         try:
             if PROTO_ACCOUNTS_JSON.exists():
                 proto_records = json.loads(PROTO_ACCOUNTS_JSON.read_text(encoding="utf-8"))
             else:
                 proto_records = []
             for r in proto_records:
-                em = r.get("email")
-                if em in success_emails:
-                    r["password"] = pwd_map[em]
+                if r.get("email") == email:
+                    r["password"] = password
                     proto_changed = True
             if proto_changed:
                 PROTO_ACCOUNTS_JSON.write_text(
@@ -1654,5 +1649,3 @@ def _apply_reset_to_history(emails: list[str]):
 
     if changed:
         _broadcast_from_thread({"type": "history_update", "history": state.history})
-    if changed or proto_changed:
-        logger.info(f"已更新 {len(success_emails)} 个账号的密码记录")
