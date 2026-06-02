@@ -1,0 +1,1 @@
+- [Password-reset email freshness](reset-email-freshness.md) — detect fresh inbound mail by pre-request ID snapshot, never by cross-server timestamp compare; YYDS/JetBrains 改密 quirks.

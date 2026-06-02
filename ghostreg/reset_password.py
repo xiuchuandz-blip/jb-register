@@ -156,18 +156,25 @@ def _mail_id_to_timestamp(mail_id: str) -> float:
 
 
 def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
-                          since: float = 0.0) -> dict:
+                          since: float = 0.0, known_ids: set | None = None) -> dict:
     """
     轮询邮件箱，寻找 JetBrains 密码重置邮件。
-    since: Unix 时间戳，只处理在此时刻之后到达的邮件（防止匹配历史旧邮件）。
+    known_ids: 请求发起前邮箱中已存在的邮件 ID 集合。轮询时只认"新出现"
+               （不在该集合里）的邮件，从而不依赖服务器时钟，避免时钟偏差
+               导致刚到的重置邮件被误判为旧邮件而跳过。
+    since: Unix 时间戳，仅作兜底——跳过明显过旧（10 分钟以前）的历史邮件。
     返回 {"type": "link", "value": url} 或 {"type": "code", "value": "123456"}
     超时则抛出 TimeoutError。
     """
     deadline = time.time() + timeout
     attempt = 0
-    seen_ids: set[str] = set()
+    # 用请求前的快照预填充：这些都是旧邮件，直接忽略
+    seen_ids: set[str] = set(known_ids) if known_ids else set()
 
-    logger.info(f"开始轮询重置邮件: {email} (超时={timeout}s, since={since:.0f})")
+    logger.info(
+        f"开始轮询重置邮件: {email} (超时={timeout}s, since={since:.0f}, "
+        f"已知旧邮件={len(seen_ids)})"
+    )
 
     while time.time() < deadline:
         attempt += 1
@@ -184,8 +191,11 @@ def poll_email_for_reset(email: str, timeout: float = 300, interval: float = 5,
                 continue
             seen_ids.add(mid)
 
-            # 过滤：跳过在重置请求发起之前到达的旧邮件
-            if since > 0 and _mail_id_to_timestamp(mid) < since - 5:
+            # 兜底过滤：仅跳过明显过旧（10 分钟以前）的历史邮件。
+            # 放宽到 10 分钟是为了容忍 YYDS 服务器与本机的时钟偏差，
+            # 真正的"新邮件"判定已由 known_ids 预快照负责（见上）。
+            ts = _mail_id_to_timestamp(mid)
+            if since > 0 and ts > 0 and ts < since - 600:
                 continue
 
             content = mail.get("content", "") or mail.get("html", "") or mail.get("text", "")
@@ -551,6 +561,12 @@ def reset_account_password(
         # Step 2: 触发忘记密码
         log("向 JetBrains 请求发送密码重置邮件...", "request_reset")
         reset_request_time = time.time()  # 记录请求时刻，过滤旧邮件用
+        # 预快照：请求前邮箱已有的邮件 ID。轮询时只认"新出现"的邮件，
+        # 不依赖服务器时钟，避免时钟偏差导致刚到的重置邮件被误判为旧邮件。
+        try:
+            known_ids = {m.get("id") for m in get_mails(email) if m.get("id")}
+        except Exception:
+            known_ids = set()
         resetter = JBPasswordResetter()
         ok = resetter.request_forgot_password(email)
         if not ok:
@@ -558,9 +574,9 @@ def reset_account_password(
 
         log("重置邮件已请求，等待邮件到达...", "polling")
 
-        # Step 3: 轮询邮件（只看 reset_request_time 之后到达的新邮件）
+        # Step 3: 轮询邮件（只认请求后新出现的邮件，known_ids 为请求前快照）
         result = poll_email_for_reset(email, timeout=poll_timeout, interval=5,
-                                      since=reset_request_time)
+                                      since=reset_request_time, known_ids=known_ids)
         log(f"收到重置邮件 (类型: {result['type']})", "got_mail")
 
         # Step 4: 完成重置
