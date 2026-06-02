@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "lwdwgSLeDmlEHZxDoBtwF"
+uri = "file://output/recover_email_list.csv"
+type = "table"
+title = "最近100个邮箱列表(已排除58个协议邮箱)"
