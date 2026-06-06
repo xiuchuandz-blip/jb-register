@@ -113,6 +113,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchTab('browser')">浏览器注册</button>
     <button class="tab-btn" onclick="switchTab('protocol')">协议注册机 <span class="proto-speed">10x 快</span></button>
+    <button class="tab-btn" onclick="switchTab('outlook')">Outlook邮箱注册 <span class="proto-speed" style="background:linear-gradient(135deg,#0078d4,#106ebe)">自备邮箱</span></button>
   </div>
 
   <!-- ═══ Tab 1: 浏览器注册（原有内容） ═══ -->
@@ -646,6 +647,111 @@
     </div>
   </div><!-- /tab-protocol -->
 
+  <!-- ═══ Tab 3: Outlook 邮箱注册 ═══ -->
+  <div class="tab-page" id="tab-outlook">
+
+  <div class="panel" style="border-color:#0078d4;background:rgba(0,120,212,.07)">
+    <div style="font-size:15px;font-weight:700;color:#4da6ff;margin-bottom:10px">Outlook / Microsoft 邮箱直接注册 JetBrains 账号</div>
+    <div style="font-size:13px;color:var(--text);line-height:1.8">
+      使用您自备的 Outlook / Hotmail / Live / Office365 邮箱完成注册。<br>
+      系统会用您的邮箱直接向 JetBrains 注册（邮箱既是 JB 账号地址，也是 OTP 接收地址）。<br>
+      <strong style="color:#4da6ff">凭证格式（每行一个）：</strong>
+      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px">邮箱----密码</code>
+      &nbsp;或&nbsp;
+      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px">邮箱:密码</code><br>
+      <span style="color:var(--warning)">⚠ 需启用 IMAP 访问（Microsoft 账户设置 → 邮件 → 同步电子邮件 → POP/IMAP）。<br>
+      &nbsp;&nbsp;若账号开启了二步验证，请使用「应用密码」而非账号主密码。</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">邮箱凭证（每行一个账号）</div>
+
+    <div class="form-row">
+      <div class="form-group" style="flex:2">
+        <label>邮箱凭证列表</label>
+        <textarea id="outlookCredentials" rows="7"
+          placeholder="粘贴凭证，每行一个，例如：&#10;user1@outlook.com----Password123&#10;user2@hotmail.com----AppPassword456&#10;work@company.com----WorkPass789"
+          style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;font-family:Consolas,monospace;resize:vertical;outline:none;line-height:1.6"></textarea>
+        <div class="form-hint">支持格式：<code>邮箱----密码</code> / <code>邮箱:密码</code> / <code>邮箱 密码</code>（制表符分隔）</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;justify-content:flex-end;flex-shrink:0;padding-bottom:22px">
+        <button class="btn btn-secondary btn-small" onclick="outlookTestFirst()" style="width:120px;border-color:#0078d4;color:#4da6ff">测试首个连接</button>
+        <button class="btn btn-secondary btn-small" onclick="document.getElementById('outlookCredentials').value=''" style="width:120px">清空</button>
+      </div>
+    </div>
+    <div id="outlookTestResult" style="font-size:13px;margin-bottom:12px;display:none;padding:8px 12px;border-radius:6px"></div>
+
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>JetBrains 账号密码（注册时设置）</label>
+        <input type="text" id="outlookJbPassword" value="QPalzmw123">
+        <div class="form-hint">为每个注册的 JetBrains 账号设置此密码</div>
+      </div>
+      <div class="form-group" style="flex:0.5;min-width:120px">
+        <label>并发数</label>
+        <input type="number" id="outlookWorkers" value="1" min="1" max="5">
+        <div class="form-hint">建议 1-2，太高易被封</div>
+      </div>
+      <div class="form-group" style="flex:0.5;min-width:120px">
+        <label>OTP 等待时间(秒)</label>
+        <input type="number" id="outlookOtpTimeout" value="120" min="30" max="300">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group" style="flex:1">
+        <label>名字（留空随机）</label>
+        <input type="text" id="outlookFirstName" placeholder="留空自动随机">
+      </div>
+      <div class="form-group" style="flex:1">
+        <label>姓氏（留空随机）</label>
+        <input type="text" id="outlookLastName" placeholder="留空自动随机">
+      </div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btnOutlookStart" onclick="outlookStart()" style="background:linear-gradient(135deg,#0078d4,#106ebe)">开始注册</button>
+      <button class="btn btn-secondary" id="btnOutlookStop" onclick="outlookStop()" style="display:none">停止</button>
+    </div>
+  </div>
+
+  <!-- 进度 -->
+  <div class="panel">
+    <div class="panel-title">注册进度</div>
+    <div class="status-bar">
+      <div class="status-dot" id="outlookDot"></div>
+      <span id="outlookStatusText">就绪</span>
+    </div>
+    <div id="outlookTaskArea">
+      <div class="empty"><div class="empty-icon">📬</div><div>填写凭证并点击「开始注册」</div></div>
+    </div>
+    <div class="summary" id="outlookSummary" style="display:none">
+      <div class="summary-item"><div class="summary-num" id="outlookNumTotal" style="color:var(--text)">0</div><div class="summary-label">总计</div></div>
+      <div class="summary-item"><div class="summary-num" id="outlookNumSuccess" style="color:var(--success)">0</div><div class="summary-label">成功</div></div>
+      <div class="summary-item"><div class="summary-num" id="outlookNumFailed" style="color:var(--error)">0</div><div class="summary-label">失败</div></div>
+      <div class="summary-item"><div class="summary-num" id="outlookNumPending" style="color:var(--warning)">0</div><div class="summary-label">进行中</div></div>
+    </div>
+  </div>
+
+  <!-- 历史 -->
+  <div class="panel" id="outlookHistoryPanel" style="margin-top:4px">
+    <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+      <span>注册历史</span>
+      <div style="display:flex;gap:8px" id="outlookHistoryActions">
+        <button class="btn btn-secondary btn-small" onclick="outlookCopyAll()" id="btnOutlookCopyAll" style="display:none">批量复制</button>
+        <button class="btn btn-secondary btn-small" onclick="outlookDeleteAll()" style="display:none;border-color:var(--error);color:var(--error)" id="btnOutlookDeleteAll">清空历史</button>
+      </div>
+    </div>
+    <div style="font-size:12px;color:var(--muted);line-height:1.6;margin-bottom:12px;padding:8px 14px;background:rgba(0,120,212,.06);border-radius:8px;border:1px solid var(--border)">
+      Outlook 注册账号保存在 <code style="color:#4da6ff;background:rgba(0,120,212,.12);padding:1px 6px;border-radius:4px">output/outlook_accounts.json</code> 和
+      <code style="color:#4da6ff;background:rgba(0,120,212,.12);padding:1px 6px;border-radius:4px">output/outlook_accounts.csv</code> 中。
+    </div>
+    <div id="outlookHistoryArea"><span style="color:var(--muted);font-size:14px">暂无记录</span></div>
+  </div>
+
+  </div><!-- /tab-outlook -->
+
 </div>
 
 <!-- ═══ 手动改密面板（独立于 Tab，常驻显示） ═══ -->
@@ -753,6 +859,30 @@ function handleMessage(msg) {
   }
   else if (msg.type === 'reset_started' || msg.type === 'reset_update' || msg.type === 'reset_completed') {
     handleResetMessage(msg);
+  }
+  else if (msg.type === 'outlook_started') {
+    outlookTasks = msg.tasks || {};
+    document.getElementById('btnOutlookStart').style.display = 'none';
+    document.getElementById('btnOutlookStop').style.display = '';
+    renderOutlookTasks();
+    updateOutlookSummary();
+    document.getElementById('outlookDot').className = 'status-dot running';
+    document.getElementById('outlookStatusText').textContent = '注册中...';
+  }
+  else if (msg.type === 'outlook_update') {
+    if (msg.task) outlookTasks[msg.task.task_id] = msg.task;
+    renderOutlookTasks();
+    updateOutlookSummary();
+  }
+  else if (msg.type === 'outlook_completed') {
+    outlookTasks = msg.tasks || outlookTasks;
+    document.getElementById('btnOutlookStart').style.display = '';
+    document.getElementById('btnOutlookStop').style.display = 'none';
+    document.getElementById('outlookDot').className = 'status-dot';
+    document.getElementById('outlookStatusText').textContent = '已完成';
+    renderOutlookTasks();
+    updateOutlookSummary();
+    if (msg.history) { outlookHistoryData = msg.history; renderOutlookHistory(); }
   }
 }
 
@@ -1536,11 +1666,200 @@ async function saveCaptchaConfig() {
 
 function switchTab(tab) {
   document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', (tab==='browser' && i===0) || (tab==='protocol' && i===1));
+    b.classList.toggle('active',
+      (tab==='browser' && i===0) ||
+      (tab==='protocol' && i===1) ||
+      (tab==='outlook' && i===2)
+    );
   });
   document.getElementById('tab-browser').classList.toggle('active', tab==='browser');
   document.getElementById('tab-protocol').classList.toggle('active', tab==='protocol');
+  document.getElementById('tab-outlook').classList.toggle('active', tab==='outlook');
   if (tab==='protocol') loadProtoHistory();
+  if (tab==='outlook') loadOutlookHistory();
+}
+
+// ── Outlook 注册 ──
+
+let outlookTasks = {};
+let outlookHistoryData = [];
+
+function outlookParseFirst() {
+  const raw = document.getElementById('outlookCredentials').value.trim();
+  if (!raw) return null;
+  for (const line of raw.split('\n')) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) continue;
+    let email = '', pass = '';
+    if (l.includes('----')) { [email, pass] = l.split('----', 2); }
+    else if ((l.match(/:/g)||[]).length === 1) { [email, pass] = l.split(':', 2); }
+    else { const parts = l.split(/\s+/); email = parts[0]; pass = parts[1] || ''; }
+    email = email.trim(); pass = pass.trim();
+    if (email.includes('@') && pass) return {email, password: pass};
+  }
+  return null;
+}
+
+async function outlookTestFirst() {
+  const cred = outlookParseFirst();
+  const div = document.getElementById('outlookTestResult');
+  if (!cred) {
+    div.style.display = 'block';
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--error)';
+    div.textContent = '未解析到有效凭证，请检查格式';
+    return;
+  }
+  div.style.display = 'block';
+  div.style.background = 'rgba(99,102,241,.1)';
+  div.style.color = 'var(--accent)';
+  div.textContent = `测试连接: ${cred.email} ...`;
+  try {
+    const r = await fetch('/api/outlook/test-imap', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({email: cred.email, password: cred.password}),
+    });
+    const data = await r.json();
+    if (data.ok) {
+      div.style.background = 'rgba(34,197,94,.12)';
+      div.style.color = 'var(--success)';
+      div.textContent = `✓ ${data.message}`;
+    } else {
+      div.style.background = 'rgba(239,68,68,.12)';
+      div.style.color = 'var(--error)';
+      div.textContent = `✗ ${data.message}`;
+    }
+  } catch(e) {
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--error)';
+    div.textContent = `请求失败: ${e}`;
+  }
+}
+
+async function outlookStart() {
+  const credentials = document.getElementById('outlookCredentials').value;
+  const jb_password = document.getElementById('outlookJbPassword').value.trim();
+  const workers = parseInt(document.getElementById('outlookWorkers').value) || 1;
+  const otp_timeout = parseInt(document.getElementById('outlookOtpTimeout').value) || 120;
+  const first_name = document.getElementById('outlookFirstName').value.trim() || null;
+  const last_name = document.getElementById('outlookLastName').value.trim() || null;
+  if (!credentials.trim()) { alert('请先填写邮箱凭证'); return; }
+  if (!jb_password || jb_password.length < 8) { alert('JetBrains 密码至少 8 位'); return; }
+
+  const r = await fetch('/api/outlook/start', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({credentials, jb_password, workers, otp_timeout, first_name, last_name}),
+  });
+  const data = await r.json();
+  if (!data.ok) { alert(data.error || '启动失败'); return; }
+}
+
+async function outlookStop() {
+  await fetch('/api/outlook/stop', {method: 'POST'});
+  document.getElementById('btnOutlookStop').style.display = 'none';
+  document.getElementById('btnOutlookStart').style.display = '';
+}
+
+function renderOutlookTasks() {
+  const area = document.getElementById('outlookTaskArea');
+  const ids = Object.keys(outlookTasks).map(Number).sort((a,b)=>a-b);
+  if (!ids.length) { area.innerHTML = '<div class="empty"><div class="empty-icon">📬</div><div>填写凭证并点击「开始注册」</div></div>'; return; }
+  let html = '<div class="task-list">';
+  for (const id of ids) {
+    const t = outlookTasks[id];
+    const ok = t.success;
+    const cls = ok === true ? 'done' : ok === false ? 'failed' : t.step === '等待中' ? 'waiting' : 'working';
+    const badge = ok === true ? '<span class="badge-done">✓ 成功</span>' :
+                  ok === false ? '<span class="badge-failed">✗ 失败</span>' :
+                  t.step === '等待中' ? '<span class="badge-waiting">等待</span>' :
+                  '<span class="badge-working">进行中</span>';
+    html += `<div class="task-card ${cls}">
+      <div class="task-id">${id}</div>
+      <div class="task-info">
+        <div class="task-email">${t.email || '—'}</div>
+        <div class="task-step">${t.step || ''}</div>
+      </div>
+      <div class="task-password">${ok ? (t.password || '') : ''}</div>
+      <div class="task-badge">${badge}${t.elapsed ? ` <span style="color:var(--muted);font-size:11px">${t.elapsed}s</span>` : ''}</div>
+    </div>`;
+  }
+  html += '</div>';
+  area.innerHTML = html;
+}
+
+function updateOutlookSummary() {
+  const ids = Object.keys(outlookTasks).map(Number);
+  if (!ids.length) { document.getElementById('outlookSummary').style.display = 'none'; return; }
+  document.getElementById('outlookSummary').style.display = 'flex';
+  const total = ids.length;
+  const success = ids.filter(i => outlookTasks[i].success === true).length;
+  const failed = ids.filter(i => outlookTasks[i].success === false).length;
+  const pending = total - success - failed;
+  document.getElementById('outlookNumTotal').textContent = total;
+  document.getElementById('outlookNumSuccess').textContent = success;
+  document.getElementById('outlookNumFailed').textContent = failed;
+  document.getElementById('outlookNumPending').textContent = pending;
+}
+
+async function loadOutlookHistory() {
+  try {
+    const r = await fetch('/api/outlook/history');
+    outlookHistoryData = await r.json();
+    renderOutlookHistory();
+  } catch(e) {}
+}
+
+function renderOutlookHistory() {
+  const area = document.getElementById('outlookHistoryArea');
+  const copyBtn = document.getElementById('btnOutlookCopyAll');
+  const delBtn = document.getElementById('btnOutlookDeleteAll');
+  if (!outlookHistoryData.length) {
+    area.innerHTML = '<span style="color:var(--muted);font-size:14px">暂无记录</span>';
+    if (copyBtn) copyBtn.style.display = 'none';
+    if (delBtn) delBtn.style.display = 'none';
+    return;
+  }
+  if (copyBtn) copyBtn.style.display = '';
+  if (delBtn) delBtn.style.display = '';
+  let html = '<table class="history-table"><thead><tr><th>#</th><th>Outlook邮箱(=JB账号)</th><th>JB密码</th><th>时间</th><th></th></tr></thead><tbody>';
+  outlookHistoryData.forEach((h, i) => {
+    const jbEmail = h.jb_email || h.email || '';
+    const pw = h.password || '';
+    const ts = h.timestamp || '';
+    html += `<tr>
+      <td>${i+1}</td>
+      <td class="mono">${jbEmail}</td>
+      <td class="mono">${pw}</td>
+      <td style="color:var(--muted);font-size:12px">${ts}</td>
+      <td><button class="copy-btn" onclick="navigator.clipboard.writeText('${jbEmail}     ${pw}')">复制</button></td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  area.innerHTML = html;
+}
+
+function outlookCopyAll() {
+  if (!outlookHistoryData.length) return;
+  const text = outlookHistoryData.map(h => (h.jb_email || h.email || '') + '     ' + (h.password || '')).join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btnOutlookCopyAll');
+    const old = btn.textContent;
+    btn.textContent = `已复制 ${outlookHistoryData.length} 条`;
+    setTimeout(() => btn.textContent = old, 2000);
+  });
+}
+
+async function outlookDeleteAll() {
+  if (!confirm('确认清空所有 Outlook 注册历史？')) return;
+  const r = await fetch('/api/outlook/history/delete', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({delete_all: true}),
+  });
+  const data = await r.json();
+  if (data.ok) { outlookHistoryData = []; renderOutlookHistory(); }
 }
 
 // ── 批量自动登录 ──

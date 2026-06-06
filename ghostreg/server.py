@@ -1457,6 +1457,245 @@ def _run_proto_batch(count: int, password: str, workers: int,
 
 
 # ══════════════════════════════════════════════════════
+#  Outlook 邮箱注册 — 使用用户提供的 Outlook 凭证注册 JetBrains 账号
+# ══════════════════════════════════════════════════════
+
+try:
+    from protocol_reg.outlook_worker import (
+        register_with_outlook as _outlook_register_one,
+        OutlookRegResult,
+        OUTLOOK_ACCOUNTS_JSON,
+        OUTLOOK_ACCOUNTS_CSV,
+    )
+    from ghostreg.outlook_email_service import test_connection as outlook_test_conn, parse_credentials_text
+    OUTLOOK_REG_AVAILABLE = True
+except ImportError as _e:
+    OUTLOOK_REG_AVAILABLE = False
+    logger.warning(f"Outlook 注册模块加载失败: {_e}")
+
+
+class OutlookState:
+    def __init__(self):
+        self.tasks: dict[int, dict] = {}
+        self.running = False
+        self.lock = threading.Lock()
+
+
+outlook_state = OutlookState()
+
+
+class OutlookStartRequest(BaseModel):
+    credentials: str = ""        # 多行文本：每行 email----password
+    jb_password: str = "QPalzmw123"
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    workers: int = 1
+    otp_timeout: int = 120
+
+
+class OutlookTestRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/api/outlook/test-imap")
+async def outlook_test_imap(req: OutlookTestRequest):
+    """测试单个 Outlook 账号的 IMAP 连接"""
+    if not OUTLOOK_REG_AVAILABLE:
+        return {"ok": False, "message": "Outlook 模块未加载"}
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, outlook_test_conn, req.email, req.password)
+    return result
+
+
+@app.post("/api/outlook/start")
+async def outlook_start(req: OutlookStartRequest):
+    if not OUTLOOK_REG_AVAILABLE:
+        return {"ok": False, "error": "Outlook 注册模块未加载"}
+    if outlook_state.running:
+        return {"ok": False, "error": "已有 Outlook 注册任务在运行"}
+
+    credentials = parse_credentials_text(req.credentials)
+    if not credentials:
+        return {"ok": False, "error": "未解析到有效的邮箱凭证，请检查格式（每行：邮箱----密码）"}
+
+    count = len(credentials)
+    workers = max(1, min(req.workers, 10))
+
+    outlook_state.running = True
+    outlook_state.tasks = {}
+    for i, cred in enumerate(credentials, start=1):
+        outlook_state.tasks[i] = {
+            "task_id": i,
+            "email": cred["email"],
+            "step": "等待中",
+            "success": None,
+            "error": "",
+            "elapsed": 0,
+        }
+
+    _broadcast_from_thread({"type": "outlook_started", "tasks": outlook_state.tasks})
+
+    thread = threading.Thread(
+        target=_run_outlook_batch,
+        args=(credentials, req.jb_password, workers,
+              req.first_name, req.last_name, req.otp_timeout),
+        daemon=True,
+    )
+    thread.start()
+
+    return {"ok": True, "message": f"已启动 {count} 个 Outlook 注册任务（{workers} 路并发）"}
+
+
+@app.post("/api/outlook/stop")
+async def outlook_stop():
+    outlook_state.running = False
+    return {"ok": True}
+
+
+@app.get("/api/outlook/status")
+async def outlook_status():
+    return {"running": outlook_state.running, "tasks": outlook_state.tasks}
+
+
+@app.get("/api/outlook/history")
+async def outlook_history():
+    if OUTLOOK_ACCOUNTS_JSON.exists():
+        try:
+            data = json.loads(OUTLOOK_ACCOUNTS_JSON.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                return data
+        except Exception:
+            pass
+    return []
+
+
+class OutlookDeleteRequest(BaseModel):
+    indexes: list[int] = []
+    delete_all: bool = False
+
+
+@app.post("/api/outlook/history/delete")
+async def outlook_history_delete(req: OutlookDeleteRequest):
+    records = []
+    if OUTLOOK_ACCOUNTS_JSON.exists():
+        try:
+            records = json.loads(OUTLOOK_ACCOUNTS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    if req.delete_all:
+        records = []
+    elif req.indexes:
+        for idx in sorted(set(req.indexes), reverse=True):
+            if 0 <= idx < len(records):
+                records.pop(idx)
+
+    OUTLOOK_ACCOUNTS_JSON.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    import csv as _csv
+    with open(OUTLOOK_ACCOUNTS_CSV, "w", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        w.writerow(["jb_email", "password", "outlook_email", "timestamp"])
+        for r in records:
+            w.writerow([
+                r.get("jb_email") or r.get("email", ""),
+                r.get("password", ""),
+                r.get("email", ""),
+                r.get("timestamp", ""),
+            ])
+    return {"ok": True, "history": records}
+
+
+def _run_outlook_batch(
+    credentials: list[dict],
+    jb_password: str,
+    workers: int,
+    first_name: Optional[str],
+    last_name: Optional[str],
+    otp_timeout: int,
+):
+    """后台线程：批量 Outlook 注册"""
+    import random, string
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+
+    _manual_worker_url = config.CF_WORKER_URL or ""
+    _ladder_proxy = config.CF_LADDER_PROXY or ""
+
+    def _random_name(length=5):
+        first = random.choice(string.ascii_uppercase)
+        rest = "".join(random.choices(string.ascii_lowercase, k=length - 1))
+        return first + rest
+
+    def _run_one(task_id: int, cred: dict):
+        if not outlook_state.running:
+            return
+        fname = first_name or _random_name(random.randint(4, 7))
+        lname = last_name or _random_name(random.randint(4, 7))
+
+        outlook_state.tasks[task_id]["step"] = "IMAP 连接中..."
+        _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[task_id]})
+
+        def _progress_step(label: str):
+            outlook_state.tasks[task_id]["step"] = label
+            _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[task_id]})
+
+        _progress_step("IMAP 快照")
+        result = _outlook_register_one(
+            task_id=task_id,
+            outlook_email=cred["email"],
+            outlook_password=cred["password"],
+            jb_password=jb_password,
+            first_name=fname,
+            last_name=lname,
+            worker_url=_manual_worker_url,
+            ladder_proxy=_ladder_proxy,
+            should_stop=lambda: not outlook_state.running,
+            otp_timeout=float(otp_timeout),
+        )
+
+        outlook_state.tasks[task_id].update({
+            "success": result.success,
+            "error": result.error,
+            "elapsed": round(result.elapsed, 1),
+            "step": "注册成功" if result.success else f"失败: {result.error[:60]}",
+            "password": result.password if result.success else "",
+        })
+        _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[task_id]})
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_run_one, i, cred): i for i, cred in enumerate(credentials, start=1)}
+        timeout = max(600, len(credentials) * 180)
+        for f in _as_completed(futures, timeout=timeout):
+            tid = futures[f]
+            try:
+                f.result()
+            except Exception as e:
+                logger.error(f"[Outlook Task {tid}] 线程异常: {e}")
+                outlook_state.tasks[tid].update({
+                    "success": False, "error": str(e), "step": f"线程异常: {e}"
+                })
+                _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[tid]})
+
+    outlook_state.running = False
+
+    history_list = []
+    if OUTLOOK_ACCOUNTS_JSON.exists():
+        try:
+            history_list = json.loads(OUTLOOK_ACCOUNTS_JSON.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    _broadcast_from_thread({
+        "type": "outlook_completed",
+        "tasks": outlook_state.tasks,
+        "history": history_list,
+    })
+
+
+# ══════════════════════════════════════════════════════
 #  改密功能 — 通过邮箱找回并重置 JetBrains 账号密码
 # ══════════════════════════════════════════════════════
 
