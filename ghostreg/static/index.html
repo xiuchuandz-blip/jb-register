@@ -685,8 +685,8 @@
     <div class="form-row">
       <div class="form-group" style="flex:1">
         <label>JetBrains 账号密码（注册时设置）</label>
-        <input type="text" id="outlookJbPassword" value="QPalzmw123">
-        <div class="form-hint">为每个注册的 JetBrains 账号设置此密码</div>
+        <input type="text" id="outlookJbPassword" value="" placeholder="留空则每个账号随机生成">
+        <div class="form-hint">留空 = 每个账号独立随机密码；填写 = 所有账号用同一密码</div>
       </div>
       <div class="form-group" style="flex:0.5;min-width:120px">
         <label>并发数</label>
@@ -1759,7 +1759,7 @@ async function outlookStart() {
   const first_name = document.getElementById('outlookFirstName').value.trim() || null;
   const last_name = document.getElementById('outlookLastName').value.trim() || null;
   if (!credentials.trim()) { alert('请先填写邮箱凭证'); return; }
-  if (!jb_password || jb_password.length < 8) { alert('JetBrains 密码至少 8 位'); return; }
+  if (jb_password && jb_password.length < 8) { alert('JetBrains 密码至少 8 位，或留空由系统随机生成'); return; }
 
   const r = await fetch('/api/outlook/start', {
     method: 'POST',

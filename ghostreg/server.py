@@ -1639,6 +1639,7 @@ def _run_outlook_batch(
             return
         fname = first_name or _random_name(random.randint(4, 7))
         lname = last_name or _random_name(random.randint(4, 7))
+        task_pwd = jb_password if jb_password else _random_password()
 
         method = "Graph API" if cred.get("refresh_token") else "IMAP"
         outlook_state.tasks[task_id]["step"] = f"邮件快照 ({method})..."
@@ -1647,7 +1648,7 @@ def _run_outlook_batch(
         result = _outlook_register_one(
             task_id=task_id,
             cred=cred,
-            jb_password=jb_password,
+            jb_password=task_pwd,
             first_name=fname,
             last_name=lname,
             worker_url=_manual_worker_url,
