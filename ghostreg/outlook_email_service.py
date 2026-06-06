@@ -165,8 +165,9 @@ def refresh_access_token(client_id: str, refresh_token: str,
 # ══════════════════════════════════════════════
 
 def _xoauth2_string(email_addr: str, access_token: str) -> bytes:
+    # imaplib.authenticate() 内部会再做一次 base64，所以这里只返回原始字节
     raw = f"user={email_addr}\x01auth=Bearer {access_token}\x01\x01"
-    return base64.b64encode(raw.encode())
+    return raw.encode()
 
 
 def connect_imap_xoauth2(email_addr: str, access_token: str) -> imaplib.IMAP4_SSL:
@@ -535,7 +536,8 @@ def test_connection(email_addr: str, password: str = "",
                 "method": "imap_xoauth2",
             }
         except Exception as e1:
-            logger.info(f"IMAP XOAUTH2 测试失败: {e1}，尝试 Graph API...")
+            xoauth_err = str(e1)  # Python 3 会在 except 块结束后删除 e1，提前保存
+            logger.info(f"IMAP XOAUTH2 测试失败: {xoauth_err}，尝试 Graph API...")
 
         # 2. 尝试 Graph API
         try:
@@ -550,10 +552,9 @@ def test_connection(email_addr: str, password: str = "",
                 "method": "graph",
             }
         except Exception as e2:
-            # 区分 token 换取失败 vs Graph 调用失败
             return {
                 "ok": False,
-                "message": f"IMAP XOAUTH2 失败: {str(e1)[:80]}；Graph 失败: {str(e2)[:80]}",
+                "message": f"IMAP XOAUTH2 失败: {xoauth_err[:80]}；Graph 失败: {str(e2)[:80]}",
                 "method": "none",
             }
 
