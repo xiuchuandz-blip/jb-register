@@ -1495,17 +1495,22 @@ class OutlookStartRequest(BaseModel):
 
 class OutlookTestRequest(BaseModel):
     email: str
-    password: str
+    password: str = ""
+    client_id: str = ""
+    refresh_token: str = ""
 
 
 @app.post("/api/outlook/test-imap")
 async def outlook_test_imap(req: OutlookTestRequest):
-    """测试单个 Outlook 账号的 IMAP 连接"""
+    """测试单个 Outlook 账号连接（Graph API 或 IMAP）"""
     if not OUTLOOK_REG_AVAILABLE:
         return {"ok": False, "message": "Outlook 模块未加载"}
     import asyncio
     loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, outlook_test_conn, req.email, req.password)
+    result = await loop.run_in_executor(
+        None, outlook_test_conn,
+        req.email, req.password, req.client_id, req.refresh_token,
+    )
     return result
 
 
@@ -1635,18 +1640,13 @@ def _run_outlook_batch(
         fname = first_name or _random_name(random.randint(4, 7))
         lname = last_name or _random_name(random.randint(4, 7))
 
-        outlook_state.tasks[task_id]["step"] = "IMAP 连接中..."
+        method = "Graph API" if cred.get("refresh_token") else "IMAP"
+        outlook_state.tasks[task_id]["step"] = f"邮件快照 ({method})..."
         _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[task_id]})
 
-        def _progress_step(label: str):
-            outlook_state.tasks[task_id]["step"] = label
-            _broadcast_from_thread({"type": "outlook_update", "task": outlook_state.tasks[task_id]})
-
-        _progress_step("IMAP 快照")
         result = _outlook_register_one(
             task_id=task_id,
-            outlook_email=cred["email"],
-            outlook_password=cred["password"],
+            cred=cred,
             jb_password=jb_password,
             first_name=fname,
             last_name=lname,

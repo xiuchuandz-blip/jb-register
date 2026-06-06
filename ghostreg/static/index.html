@@ -654,13 +654,13 @@
     <div style="font-size:15px;font-weight:700;color:#4da6ff;margin-bottom:10px">Outlook / Microsoft 邮箱直接注册 JetBrains 账号</div>
     <div style="font-size:13px;color:var(--text);line-height:1.8">
       使用您自备的 Outlook / Hotmail / Live / Office365 邮箱完成注册。<br>
-      系统会用您的邮箱直接向 JetBrains 注册（邮箱既是 JB 账号地址，也是 OTP 接收地址）。<br>
-      <strong style="color:#4da6ff">凭证格式（每行一个）：</strong>
-      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px">邮箱----密码</code>
-      &nbsp;或&nbsp;
-      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px">邮箱:密码</code><br>
-      <span style="color:var(--warning)">⚠ 需启用 IMAP 访问（Microsoft 账户设置 → 邮件 → 同步电子邮件 → POP/IMAP）。<br>
-      &nbsp;&nbsp;若账号开启了二步验证，请使用「应用密码」而非账号主密码。</span>
+      系统会用您的邮箱向 JetBrains 注册（邮箱即 JB 账号地址 + OTP 接收地址）。<br>
+      <strong style="color:#4da6ff">支持两种凭证格式：</strong><br>
+      &nbsp;① <strong style="color:#4da6ff">4段 OAuth（推荐，无需开 IMAP）：</strong>
+      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px;font-size:12px">邮箱----密码----client_id----refresh_token</code><br>
+      &nbsp;&nbsp;&nbsp;示例：<code style="background:rgba(0,0,0,.3);padding:1px 6px;border-radius:4px;font-size:11px">RobertWag@outlook.com----pjlbhn93854----9e5f94bc-e8a4-4e73-b8be-63364c29d753----M.C508_BAY...</code><br>
+      &nbsp;② <strong>2段 IMAP（需在 Microsoft 账户中开启 IMAP）：</strong>
+      <code style="background:rgba(0,120,212,.15);padding:2px 8px;border-radius:4px;font-size:12px">邮箱----密码</code>
     </div>
   </div>
 
@@ -1690,12 +1690,20 @@ function outlookParseFirst() {
   for (const line of raw.split('\n')) {
     const l = line.trim();
     if (!l || l.startsWith('#')) continue;
-    let email = '', pass = '';
-    if (l.includes('----')) { [email, pass] = l.split('----', 2); }
-    else if ((l.match(/:/g)||[]).length === 1) { [email, pass] = l.split(':', 2); }
-    else { const parts = l.split(/\s+/); email = parts[0]; pass = parts[1] || ''; }
-    email = email.trim(); pass = pass.trim();
-    if (email.includes('@') && pass) return {email, password: pass};
+    const parts = l.split('----');
+    if (parts.length >= 4) {
+      const email = parts[0].trim(), password = parts[1].trim();
+      const client_id = parts[2].trim(), refresh_token = parts[3].trim();
+      if (email.includes('@') && refresh_token) return {email, password, client_id, refresh_token};
+    }
+    if (parts.length === 2) {
+      const email = parts[0].trim(), password = parts[1].trim();
+      if (email.includes('@') && password) return {email, password};
+    }
+    if (l.includes(':') && (l.match(/:/g)||[]).length === 1) {
+      const [email, password] = l.split(':', 2).map(s => s.trim());
+      if (email.includes('@') && password) return {email, password};
+    }
   }
   return null;
 }
@@ -1713,12 +1721,18 @@ async function outlookTestFirst() {
   div.style.display = 'block';
   div.style.background = 'rgba(99,102,241,.1)';
   div.style.color = 'var(--accent)';
-  div.textContent = `测试连接: ${cred.email} ...`;
+  const method = cred.refresh_token ? 'Graph API' : 'IMAP';
+  div.textContent = `测试连接 (${method}): ${cred.email} ...`;
   try {
     const r = await fetch('/api/outlook/test-imap', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({email: cred.email, password: cred.password}),
+      body: JSON.stringify({
+        email: cred.email,
+        password: cred.password || '',
+        client_id: cred.client_id || '',
+        refresh_token: cred.refresh_token || '',
+      }),
     });
     const data = await r.json();
     if (data.ok) {
