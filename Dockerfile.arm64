@@ -1,4 +1,5 @@
 # jb-register (GhostReg) — Python / FastAPI + 浏览器自动化
+# 仅用于 GitHub Actions 构建 arm64 镜像；x86 源码部署(nixpacks)不使用此文件。
 FROM python:3.11-slim
 
 WORKDIR /app
