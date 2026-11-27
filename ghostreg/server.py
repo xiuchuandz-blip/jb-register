@@ -23,6 +23,8 @@ from pydantic import BaseModel
 from . import config
 from .register import (register_one, fill_card_info, clear_card_info, confirm_card,
                        scan_debug_browsers, connect_browser_by_port, open_browsers,
+                       allocate_debug_ports, release_debug_port, close_browser_by_port,
+                       _proto_login_single,
                        cleanup_stale_browser_data, get_country_list,
                        TaskStatus, AccountResult)
 from . import captcha_service
@@ -241,13 +243,14 @@ async def websocket_endpoint(ws: WebSocket):
     state.ws_connections.append(ws)
     logger.info(f"WebSocket 连接 +1 (当前 {len(state.ws_connections)})")
 
-    # 发送当前状态快照（含历史记录）
+    # 发送当前状态快照（含历史记录 + 绑卡工作台分组）
     await ws.send_json({
         "type": "snapshot",
         "running": state.running,
         "tasks": state.tasks,
         "results": state.results,
         "history": state.history,
+        "card_groups": _card_workbench_snapshot(),
     })
 
     try:
@@ -1066,8 +1069,49 @@ async def auto_login(req: AutoLoginRequest):
 #  协议登录 API（纯 HTTP 登录 + Cookie 注入浏览器）
 # ═══════════════════════════════════════════════════════════
 
+_COUNTRY_CURRENCIES = {
+    "DE": "EUR", "FR": "EUR", "IT": "EUR", "ES": "EUR", "NL": "EUR", "AT": "EUR", "BE": "EUR",
+    "IN": "INR", "JP": "JPY", "GB": "GBP", "US": "USD", "KR": "KRW", "SG": "SGD",
+    "CA": "CAD", "AU": "AUD", "CH": "CHF", "BR": "BRL",
+}
+_DEFAULT_WORKBENCH_COUNTRIES = ["DE", "IN", "JP", "GB", "US"]
+
+
+def _attach_outlook_creds(accounts: list[dict], outlook_credentials: str = "") -> list[dict]:
+    """按邮箱自动匹配 Outlook 令牌/账密（支持单独传入或账号行自带 4 段字段）"""
+    from .outlook_email_service import parse_credentials_text
+
+    cred_map: dict[str, dict] = {}
+    if outlook_credentials and outlook_credentials.strip():
+        for c in parse_credentials_text(outlook_credentials):
+            em = (c.get("email") or "").strip().lower()
+            if em:
+                cred_map[em] = c
+
+    enriched = []
+    for a in accounts:
+        item = dict(a)
+        em_lower = (item.get("email") or "").strip().lower()
+        explicit = item.get("outlook_cred")
+        if isinstance(explicit, dict) and (explicit.get("refresh_token") or explicit.get("password")):
+            enriched.append(item)
+            continue
+        if em_lower in cred_map:
+            item["outlook_cred"] = cred_map[em_lower]
+        elif item.get("refresh_token") and item.get("client_id"):
+            item["outlook_cred"] = {
+                "email": item.get("email", ""),
+                "password": item.get("mail_password") or item.get("password") or "",
+                "client_id": item.get("client_id", ""),
+                "refresh_token": item.get("refresh_token", ""),
+            }
+        enriched.append(item)
+    return enriched
+
+
 class ProtoLoginRequest(BaseModel):
     accounts: list[dict] = []       # [{"email":"xxx","password":"xxx"}, ...]
+    outlook_credentials: str = ""   # 可选 Outlook 令牌列表（按邮箱匹配）
     browser: str = "chrome"
     country: str = "JP"
     auto_tokens: bool = False
@@ -1076,7 +1120,7 @@ class ProtoLoginRequest(BaseModel):
 
 @app.post("/api/proto-login")
 async def proto_login(req: ProtoLoginRequest):
-    """协议批量登录：纯 HTTP 登录 + Cookie 注入浏览器（比浏览器登录快 5-10 倍）"""
+    """协议批量登录：纯 HTTP 登录 + Cookie 注入浏览器（支持邮箱 OTP + Outlook 令牌）"""
     from .register import proto_login_batch
 
     if not req.accounts:
@@ -1087,7 +1131,7 @@ async def proto_login(req: ProtoLoginRequest):
         return {"ok": False, "error": "没有有效的账号（需要 email 和 password）"}
 
     count = min(len(accounts), 20)
-    accounts = accounts[:count]
+    accounts = _attach_outlook_creds(accounts[:count], req.outlook_credentials)
     login_workers = max(1, min(req.workers, 15))
 
     def _run():
@@ -1110,6 +1154,487 @@ async def proto_login(req: ProtoLoginRequest):
     thread.start()
 
     return {"ok": True, "message": f"已启动 {count} 个账号的协议登录（并发={login_workers}）"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  批量绑卡工作台 API（按组拉起 10 窗口 + 5 地区轮询 + 错峰确认）
+# ═══════════════════════════════════════════════════════════
+
+class CardWorkbenchState:
+    def __init__(self):
+        self.groups: dict[int, dict] = {}
+        self.next_group_id: int = 1
+        self.pending_otps: dict[str, dict] = {}  # key: f"{group_id}:{slot_index}"
+        self.lock = threading.Lock()
+
+
+card_state = CardWorkbenchState()
+
+
+def _card_workbench_snapshot() -> list[dict]:
+    with card_state.lock:
+        result = []
+        for gid in sorted(card_state.groups.keys()):
+            g = dict(card_state.groups[gid])
+            g["slots"] = [dict(s) for s in card_state.groups[gid]["slots"]]
+            result.append(g)
+        return result
+
+
+def _emit_slot_update(group_id: int, slot_index: int, **updates):
+    with card_state.lock:
+        group = card_state.groups.get(group_id)
+        if not group or slot_index >= len(group["slots"]):
+            return None
+        slot = group["slots"][slot_index]
+        slot.update(updates)
+        snap = dict(slot)
+    _broadcast_from_thread({
+        "type": "card_slot_update",
+        "group_id": group_id,
+        "slot": snap,
+    })
+    return snap
+
+
+class WorkbenchLaunchGroupRequest(BaseModel):
+    accounts: list[dict] = []
+    outlook_credentials: str = ""
+    countries: list[str] = list(_DEFAULT_WORKBENCH_COUNTRIES)
+    browser: str = "chrome"
+    workers: int = 5
+    otp_timeout: int = 120
+    auto_tokens: bool = True
+
+
+class WorkbenchGroupTargetRequest(BaseModel):
+    group_id: int = 0   # 0 = 所有活动组
+    port: int = 0       # >0 = 指定单个窗口
+
+
+class WorkbenchFillGroupRequest(BaseModel):
+    group_id: int = 0
+    port: int = 0
+    card_number: str = ""
+    expiry_date: str = ""
+    cvv: str = ""
+    card_name: str = ""
+
+
+class WorkbenchConfirmGroupRequest(BaseModel):
+    group_id: int = 0
+    port: int = 0
+    delay_min: float = 0.8
+    delay_max: float = 2.0
+
+
+class WorkbenchOtpRequest(BaseModel):
+    group_id: int
+    slot_index: int
+    code: str = ""
+
+
+class WorkbenchCloseGroupRequest(BaseModel):
+    group_id: int = 0
+    port: int = 0
+    remove: bool = False
+
+
+@app.get("/api/card-workbench/groups")
+async def workbench_get_groups():
+    """获取工作台所有分组状态，并同步检测浏览器存活情况"""
+    live_ports = set()
+    try:
+        live_ports = {b["port"] for b in scan_debug_browsers()}
+    except Exception:
+        pass
+
+    groups = _card_workbench_snapshot()
+    for g in groups:
+        if not g.get("launching"):
+            for s in g["slots"]:
+                p = s.get("port", 0)
+                if p and s.get("ok") and p not in live_ports and s.get("stage") != "closed":
+                    s["stage"] = "closed"
+                    s["message"] = "浏览器窗口已关闭"
+    return {"ok": True, "groups": groups}
+
+
+@app.post("/api/card-workbench/launch-group")
+async def workbench_launch_group(req: WorkbenchLaunchGroupRequest):
+    """拉起一组浏览器（默认 10 个，按 5 地区依次循环两轮，支持 Outlook/YYDS/NiMail 自动接码）"""
+    valid_accounts = [a for a in req.accounts if a.get("email") and a.get("password")]
+    if not valid_accounts:
+        return {"ok": False, "error": "请提供至少一个有效账号（email + password）"}
+
+    count = min(len(valid_accounts), 20)
+    accounts = _attach_outlook_creds(valid_accounts[:count], req.outlook_credentials)
+    countries = [c.strip().upper() for c in req.countries if c and c.strip()] or list(_DEFAULT_WORKBENCH_COUNTRIES)
+    workers = max(1, min(req.workers, 15))
+    otp_timeout = max(30, min(req.otp_timeout, 300))
+
+    ports = allocate_debug_ports(count)
+    with card_state.lock:
+        gid = card_state.next_group_id
+        card_state.next_group_id += 1
+        slots = []
+        for i, acc in enumerate(accounts):
+            cc = countries[i % len(countries)]
+            slots.append({
+                "group_id": gid,
+                "slot_index": i,
+                "port": ports[i],
+                "email": acc["email"],
+                "country": cc,
+                "currency": _COUNTRY_CURRENCIES.get(cc, ""),
+                "ok": False,
+                "stage": "queued",
+                "message": "排队等待启动...",
+                "need_otp": False,
+                "otp_reason": "",
+                "has_outlook_token": bool(acc.get("outlook_cred")),
+            })
+        group = {
+            "group_id": gid,
+            "name": f"第 {gid} 组",
+            "created_at": time.strftime("%H:%M:%S"),
+            "countries": countries,
+            "browser": req.browser,
+            "launching": True,
+            "confirming": False,
+            "slots": slots,
+        }
+        card_state.groups[gid] = group
+        group_snap = dict(group)
+        group_snap["slots"] = [dict(s) for s in slots]
+
+    _broadcast_from_thread({"type": "card_group_created", "group": group_snap})
+
+    worker_url = config.CF_WORKER_URL or ""
+    ladder_proxy = config.CF_LADDER_PROXY or ""
+
+    def _run_group():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        def _run_slot(i: int, acc: dict, port: int, cc: str):
+            key = f"{gid}:{i}"
+            resend_holder: dict = {}
+
+            def _status_cb(stage: str, msg: str):
+                _emit_slot_update(gid, i, stage=stage, message=msg, need_otp=False)
+
+            def _manual_otp_fn(email_addr: str, reason: str):
+                ev = threading.Event()
+                with card_state.lock:
+                    card_state.pending_otps[key] = {
+                        "event": ev,
+                        "code": "",
+                        "resend_fn": resend_holder.get("fn"),
+                    }
+                _emit_slot_update(
+                    gid, i,
+                    stage="need_otp",
+                    message=reason or "请手动输入 6 位邮箱验证码",
+                    need_otp=True,
+                    otp_reason=reason or "需要邮箱验证码",
+                )
+                got = ev.wait(timeout=max(120, otp_timeout))
+                with card_state.lock:
+                    entry = card_state.pending_otps.pop(key, None)
+                code = (entry or {}).get("code", "") if got else ""
+                _emit_slot_update(gid, i, need_otp=False, otp_reason="")
+                return code or None
+
+            res = _proto_login_single(
+                port=port,
+                browser_type=req.browser,
+                email=acc["email"],
+                password=acc["password"],
+                country=cc,
+                auto_tokens=req.auto_tokens,
+                worker_url=worker_url,
+                ladder_proxy=ladder_proxy,
+                outlook_cred=acc.get("outlook_cred"),
+                otp_timeout=float(otp_timeout),
+                status_cb=_status_cb,
+                manual_otp_fn=_manual_otp_fn,
+                resend_holder=resend_holder,
+            )
+            _emit_slot_update(
+                gid, i,
+                ok=bool(res.get("ok")),
+                stage=res.get("stage", "failed"),
+                message=res.get("message", ""),
+                need_otp=False,
+                otp_reason="",
+            )
+            return res
+
+        with ThreadPoolExecutor(max_workers=min(count, workers)) as pool:
+            futures = {}
+            for i, acc in enumerate(accounts):
+                cc = countries[i % len(countries)]
+                f = pool.submit(_run_slot, i, acc, ports[i], cc)
+                futures[f] = i
+                if i < count - 1:
+                    time.sleep(1.5)
+            try:
+                for f in as_completed(futures, timeout=600):
+                    try:
+                        f.result()
+                    except Exception as e:
+                        idx = futures[f]
+                        release_debug_port(ports[idx])
+                        _emit_slot_update(gid, idx, ok=False, stage="failed", message=str(e), need_otp=False)
+            except TimeoutError:
+                for f, idx in futures.items():
+                    if not f.done():
+                        release_debug_port(ports[idx])
+                        _emit_slot_update(gid, idx, ok=False, stage="failed", message="启动超时", need_otp=False)
+
+        with card_state.lock:
+            grp = card_state.groups.get(gid)
+            if grp:
+                grp["launching"] = False
+                snap = dict(grp)
+                snap["slots"] = [dict(s) for s in grp["slots"]]
+            else:
+                snap = None
+        if snap:
+            _broadcast_from_thread({"type": "card_group_ready", "group": snap})
+
+    threading.Thread(target=_run_group, daemon=True).start()
+    return {"ok": True, "group": group_snap, "message": f"已启动第 {gid} 组（共 {count} 个窗口）"}
+
+
+def _collect_workbench_slots(group_id: int, port: int = 0) -> list[dict]:
+    """收集工作台目标槽位（需 ok=True 且未关闭）"""
+    slots = []
+    with card_state.lock:
+        target_groups = (
+            [card_state.groups[group_id]] if group_id > 0 and group_id in card_state.groups
+            else list(card_state.groups.values()) if group_id == 0
+            else []
+        )
+        for g in target_groups:
+            for s in g["slots"]:
+                if port > 0:
+                    if s.get("port") == port:
+                        slots.append(dict(s))
+                elif s.get("port") and s.get("ok") and s.get("stage") != "closed":
+                    slots.append(dict(s))
+    return slots
+
+
+@app.post("/api/card-workbench/submit-otp")
+async def workbench_submit_otp(req: WorkbenchOtpRequest):
+    code = (req.code or "").strip()
+    if not code:
+        return {"ok": False, "error": "请输入验证码"}
+    key = f"{req.group_id}:{req.slot_index}"
+    with card_state.lock:
+        entry = card_state.pending_otps.get(key)
+        if not entry:
+            return {"ok": False, "error": "该窗口当前未在等待验证码（可能已超时或完成）"}
+        entry["code"] = code
+        entry["event"].set()
+    return {"ok": True, "message": "验证码已提交"}
+
+
+@app.post("/api/card-workbench/resend-otp")
+async def workbench_resend_otp(req: WorkbenchOtpRequest):
+    key = f"{req.group_id}:{req.slot_index}"
+    with card_state.lock:
+        entry = card_state.pending_otps.get(key)
+        fn = (entry or {}).get("resend_fn")
+    if not fn:
+        return {"ok": False, "error": "当前不可重发验证码"}
+    ok = await asyncio.get_event_loop().run_in_executor(None, fn)
+    return {"ok": bool(ok), "message": "已重新发送验证码邮件" if ok else "重发请求失败"}
+
+
+@app.post("/api/card-workbench/fill-group")
+async def workbench_fill_group(req: WorkbenchFillGroupRequest):
+    """按组（或单窗口）一键填入银行卡信息"""
+    if not req.card_number:
+        return {"ok": False, "error": "请输入卡号"}
+
+    slots = _collect_workbench_slots(req.group_id, req.port)
+    if not slots:
+        return {"ok": False, "error": "当前组没有可操作的已登录窗口"}
+
+    def _fill_one(slot: dict) -> dict:
+        gid = slot["group_id"]
+        idx = slot["slot_index"]
+        port = slot["port"]
+        _emit_slot_update(gid, idx, stage="filling", message="正在填入卡信息...")
+        try:
+            browser = connect_browser_by_port(port)
+            r = fill_card_info(
+                browser=browser,
+                card_number=req.card_number,
+                expiry_date=req.expiry_date,
+                cvv=req.cvv,
+                card_name=req.card_name,
+            )
+            st = "card_filled" if r.get("ok") else "fill_failed"
+            _emit_slot_update(gid, idx, stage=st, message=r.get("message", ""))
+            return {"port": port, "email": slot["email"], **r}
+        except Exception as e:
+            _emit_slot_update(gid, idx, stage="fill_failed", message=f"连接/填写失败: {e}")
+            return {"port": port, "email": slot["email"], "ok": False, "message": str(e)}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = []
+    loop = asyncio.get_event_loop()
+
+    def _run_all():
+        out = []
+        with ThreadPoolExecutor(max_workers=min(len(slots), 5)) as pool:
+            futs = [pool.submit(_fill_one, s) for s in slots]
+            for f in as_completed(futs, timeout=120):
+                out.append(f.result())
+        return out
+
+    results = await loop.run_in_executor(None, _run_all)
+    success = sum(1 for r in results if r.get("ok"))
+    return {"ok": success > 0, "message": f"填卡完成：{success}/{len(results)} 个窗口成功", "results": results}
+
+
+@app.post("/api/card-workbench/clear-group")
+async def workbench_clear_group(req: WorkbenchGroupTargetRequest):
+    """按组（或单窗口）清空银行卡表单"""
+    slots = _collect_workbench_slots(req.group_id, req.port)
+    if not slots:
+        return {"ok": False, "error": "当前组没有可操作的窗口"}
+
+    def _clear_one(slot: dict) -> dict:
+        gid, idx, port = slot["group_id"], slot["slot_index"], slot["port"]
+        try:
+            browser = connect_browser_by_port(port)
+            r = clear_card_info(browser)
+            _emit_slot_update(gid, idx, stage="card_ready" if r.get("ok") else slot.get("stage", "card_ready"), message=r.get("message", ""))
+            return {"port": port, **r}
+        except Exception as e:
+            return {"port": port, "ok": False, "message": str(e)}
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    loop = asyncio.get_event_loop()
+
+    def _run_all():
+        out = []
+        with ThreadPoolExecutor(max_workers=min(len(slots), 5)) as pool:
+            futs = [pool.submit(_clear_one, s) for s in slots]
+            for f in as_completed(futs, timeout=120):
+                out.append(f.result())
+        return out
+
+    results = await loop.run_in_executor(None, _run_all)
+    success = sum(1 for r in results if r.get("ok"))
+    return {"ok": success > 0, "message": f"已清空 {success}/{len(results)} 个窗口", "results": results}
+
+
+@app.post("/api/card-workbench/confirm-group")
+async def workbench_confirm_group(req: WorkbenchConfirmGroupRequest):
+    """按组错峰确认 Confirm（每个窗口依次间隔 0.5-3s，实时通过 WS 推送结果，防止卡死）"""
+    slots = _collect_workbench_slots(req.group_id, req.port)
+    if not slots:
+        return {"ok": False, "error": "当前组没有可确认的窗口"}
+
+    d_min = max(0.5, min(float(req.delay_min), 5.0))
+    d_max = max(d_min, min(float(req.delay_max), 5.0))
+
+    with card_state.lock:
+        if req.group_id > 0:
+            grp = card_state.groups.get(req.group_id)
+            if grp and grp.get("confirming"):
+                return {"ok": False, "error": f"第 {req.group_id} 组正在确认中，请等待完成"}
+            if grp:
+                grp["confirming"] = True
+
+    _broadcast_from_thread({"type": "card_confirm_started", "group_id": req.group_id, "total": len(slots)})
+
+    def _run_staggered():
+        import random as _rnd
+        success = 0
+        try:
+            for idx_pos, slot in enumerate(slots):
+                gid = slot["group_id"]
+                idx = slot["slot_index"]
+                port = slot["port"]
+                _emit_slot_update(gid, idx, stage="confirming", message="正在点击 Confirm...")
+                try:
+                    browser = connect_browser_by_port(port)
+                    r = confirm_card(browser)
+                    if r.get("ok"):
+                        success += 1
+                    st = r.get("stage") or ("submitted" if r.get("ok") else "error")
+                    _emit_slot_update(gid, idx, stage=st, message=r.get("message", ""))
+                except Exception as e:
+                    _emit_slot_update(gid, idx, stage="error", message=f"确认异常: {e}")
+
+                if idx_pos < len(slots) - 1:
+                    time.sleep(_rnd.uniform(d_min, d_max))
+        finally:
+            with card_state.lock:
+                if req.group_id > 0 and req.group_id in card_state.groups:
+                    card_state.groups[req.group_id]["confirming"] = False
+            _broadcast_from_thread({
+                "type": "card_confirm_done",
+                "group_id": req.group_id,
+                "success": success,
+                "total": len(slots),
+            })
+
+    threading.Thread(target=_run_staggered, daemon=True).start()
+    return {
+        "ok": True,
+        "message": f"已开始错峰确认 {len(slots)} 个窗口（间隔 {d_min:.1f}~{d_max:.1f}s）",
+    }
+
+
+@app.post("/api/card-workbench/close-group")
+async def workbench_close_group(req: WorkbenchCloseGroupRequest):
+    """关闭指定组（或单个端口）的浏览器窗口；remove=true 时同时移除分组卡片"""
+    with card_state.lock:
+        target_groups = (
+            [card_state.groups[req.group_id]] if req.group_id > 0 and req.group_id in card_state.groups
+            else list(card_state.groups.values()) if req.group_id == 0
+            else []
+        )
+        ports_to_close = []
+        for g in target_groups:
+            for s in g["slots"]:
+                p = s.get("port", 0)
+                if not p:
+                    continue
+                if req.port > 0 and p != req.port:
+                    continue
+                # 唤醒任何等待手动 OTP 的线程
+                key = f"{g['group_id']}:{s['slot_index']}"
+                pending = card_state.pending_otps.pop(key, None)
+                if pending:
+                    pending["event"].set()
+                ports_to_close.append((g["group_id"], s["slot_index"], p))
+
+    closed = 0
+    loop = asyncio.get_event_loop()
+
+    def _close_all():
+        nonlocal closed
+        for gid, idx, p in ports_to_close:
+            if close_browser_by_port(p):
+                closed += 1
+            _emit_slot_update(gid, idx, ok=False, stage="closed", message="已关闭浏览器", need_otp=False)
+
+    await loop.run_in_executor(None, _close_all)
+
+    if req.remove and req.group_id > 0 and req.port == 0:
+        with card_state.lock:
+            card_state.groups.pop(req.group_id, None)
+        _broadcast_from_thread({"type": "card_group_removed", "group_id": req.group_id})
+
+    return {"ok": True, "message": f"已关闭 {closed}/{len(ports_to_close)} 个窗口"}
 
 
 # ═══════════════════════════════════════════════════════════

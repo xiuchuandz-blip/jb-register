@@ -114,6 +114,7 @@
     <button class="tab-btn active" onclick="switchTab('browser')">浏览器注册</button>
     <button class="tab-btn" onclick="switchTab('protocol')">协议注册机 <span class="proto-speed">10x 快</span></button>
     <button class="tab-btn" onclick="switchTab('outlook')">Outlook邮箱注册 <span class="proto-speed" style="background:linear-gradient(135deg,#0078d4,#106ebe)">自备邮箱</span></button>
+    <button class="tab-btn" onclick="switchTab('card')">批量绑卡 <span class="proto-speed" style="background:linear-gradient(135deg,#10b981,#059669)">10窗分组</span></button>
   </div>
 
   <!-- ═══ Tab 1: 浏览器注册（原有内容） ═══ -->
@@ -752,6 +753,141 @@
 
   </div><!-- /tab-outlook -->
 
+  <!-- ═══ Tab 4: 批量绑卡工作台（10 窗分组 + 5 地区轮询 + 错峰确认） ═══ -->
+  <div class="tab-page" id="tab-card">
+
+    <div class="panel" style="border-color:#10b981;background:rgba(16,185,129,.05)">
+      <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between;color:#10b981">
+        <span>Step 1 · 账号池与邮箱令牌（登录自动接码）</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-small" onclick="wbImportHistory('proto')">导入协议号</button>
+          <button class="btn btn-secondary btn-small" onclick="wbImportHistory('outlook')">导入Outlook号</button>
+          <button class="btn btn-secondary btn-small" onclick="wbImportHistory('browser')">导入浏览器号</button>
+          <button class="btn btn-secondary btn-small" onclick="wbResetCursor()">重置启动进度</button>
+          <button class="btn btn-secondary btn-small" onclick="wbClearAccounts()">清空</button>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1.2">
+          <label>JetBrains 账号列表（每行一个：<code>邮箱----密码</code> / <code>邮箱:密码</code> / 4段格式）</label>
+          <textarea id="wbAccounts" rows="6" oninput="wbUpdatePoolStats()" placeholder="粘贴待绑卡账号列表，例如：&#10;user1@outlook.com----JBPassword123&#10;user2@example.com----JBPassword123"></textarea>
+          <div id="wbPoolStats" style="font-size:12px;color:var(--muted);margin-top:6px">已解析 0 个账号</div>
+        </div>
+        <div class="form-group" style="flex:1.2">
+          <label style="display:flex;justify-content:space-between;align-items:center">
+            <span>Outlook 邮箱令牌（可选，按邮箱自动匹配接登录码）</span>
+            <button class="btn btn-secondary btn-small" onclick="wbTestFirstOutlook()" style="padding:2px 8px;font-size:11px;border-color:#0078d4;color:#4da6ff">测试首个令牌</button>
+          </label>
+          <textarea id="wbOutlookTokens" rows="6" oninput="wbUpdatePoolStats()" placeholder="支持与注册页相同的 4 段 / 2 段格式：&#10;邮箱----邮箱密码----client_id----refresh_token&#10;邮箱----邮箱密码&#10;（YYDS 已配 Key 与 @nimail.cn 无需填写，自动接码）"></textarea>
+          <div id="wbOutlookMatchStats" style="font-size:12px;color:var(--muted);margin-top:6px">已匹配 Outlook 令牌 0 个</div>
+        </div>
+      </div>
+      <div id="wbOutlookTestResult" style="display:none;font-size:12px;padding:8px 12px;border-radius:6px;margin-top:4px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Step 2 · 分组启动（点击一次拉起一组并自动选地区进 Add Credit Card）</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:0.5;min-width:110px">
+          <label>每组窗口数</label>
+          <input type="number" id="wbGroupSize" value="10" min="1" max="20" oninput="wbRenderCountryPreview();wbUpdatePoolStats()">
+        </div>
+        <div class="form-group" style="flex:0.5;min-width:110px">
+          <label>登录并发 (1-15)</label>
+          <input type="number" id="wbWorkers" value="5" min="1" max="15">
+        </div>
+        <div class="form-group" style="flex:0.6;min-width:120px">
+          <label>浏览器</label>
+          <select id="wbBrowser">
+            <option value="chrome">Chrome</option>
+            <option value="edge">Edge</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:0.8;min-width:170px">
+          <label>Confirm 错峰间隔 (秒)</label>
+          <div style="display:flex;gap:6px;align-items:center">
+            <input type="number" id="wbDelayMin" value="0.8" min="0.5" max="3.0" step="0.1" style="width:72px">
+            <span style="color:var(--muted)">~</span>
+            <input type="number" id="wbDelayMax" value="2.0" min="0.5" max="3.0" step="0.1" style="width:72px">
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row" style="margin-bottom:8px">
+        <div class="form-group" style="flex:2">
+          <label style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px">
+            <span>地区循环序列（默认 5 个不同货币地区依次循环两轮）</span>
+            <span style="display:flex;gap:6px">
+              <button class="btn btn-secondary btn-small" onclick="wbSetCountries('DE,IN,JP,GB,US')" style="padding:2px 8px;font-size:11px">5币种 DE,IN,JP,GB,US</button>
+              <button class="btn btn-secondary btn-small" onclick="wbSetCountries('GB,DE,US,JP')" style="padding:2px 8px;font-size:11px">4币种 GB,DE,US,JP</button>
+              <button class="btn btn-secondary btn-small" onclick="wbSetCountries('JP')" style="padding:2px 8px;font-size:11px">仅 JP</button>
+            </span>
+          </label>
+          <input type="text" id="wbCountries" value="DE,IN,JP,GB,US" oninput="wbRenderCountryPreview()" style="font-family:Consolas,monospace">
+          <div id="wbCountryPreview" style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.6"></div>
+        </div>
+      </div>
+
+      <div class="btn-row" style="align-items:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btnWbLaunchNext" onclick="wbLaunchNextGroup()" style="background:linear-gradient(135deg,#10b981,#059669)">
+          拉起下一组 (10个)
+        </button>
+        <span id="wbLaunchHint" style="font-size:12px;color:var(--muted)">每次点击自动取下一批未启动的账号创建新分组，可在下方对各组分别填卡和确认</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Step 3 · 填写卡信息 & 按组确认</div>
+      <div class="form-row">
+        <div class="form-group" style="flex:2">
+          <label>卡号 Card Number</label>
+          <input type="text" id="wbCardNumber" placeholder="4111111111111111" maxlength="19" autocomplete="cc-number">
+        </div>
+        <div class="form-group" style="flex:0.8">
+          <label>有效期 Expiry</label>
+          <input type="text" id="wbCardExpiry" placeholder="MM/YY" maxlength="5" autocomplete="cc-exp">
+        </div>
+        <div class="form-group" style="flex:0.6">
+          <label>CVV</label>
+          <input type="text" id="wbCardCvv" placeholder="123" maxlength="4" autocomplete="cc-csc">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="flex:1.5">
+          <label style="display:flex;justify-content:space-between;align-items:center">
+            <span>持卡人姓名 Name on Card（留空自动随机）</span>
+            <button class="btn btn-secondary btn-small" onclick="wbRandomCardName()" style="padding:2px 8px;font-size:11px">随机</button>
+          </label>
+          <input type="text" id="wbCardName" placeholder="留空自动生成随机英文名，如 JOHN MILLER" autocomplete="cc-name">
+        </div>
+        <div class="form-group" style="flex:1">
+          <label>目标分组</label>
+          <select id="wbTargetGroup">
+            <option value="0">所有活动组</option>
+          </select>
+        </div>
+      </div>
+      <div class="btn-row" style="flex-wrap:wrap">
+        <button class="btn btn-primary" id="btnWbFill" onclick="wbFillGroup()">一键填卡 (选中组)</button>
+        <button class="btn btn-secondary" id="btnWbClear" onclick="wbClearGroup()" style="border-color:var(--warning);color:var(--warning)">一键清空 (选中组)</button>
+        <button class="btn btn-primary" id="btnWbConfirm" onclick="wbConfirmGroup()" style="background:var(--success)">一键确认 Confirm (错峰)</button>
+        <button class="btn btn-secondary" id="btnWbClose" onclick="wbCloseGroup()" style="margin-left:auto;border-color:var(--error);color:var(--error)">关闭选中组浏览器</button>
+      </div>
+      <div id="wbActionStatus" style="margin-top:10px;font-size:13px;display:none"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title" style="display:flex;align-items:center;justify-content:space-between">
+        <span>Step 4 · 分组窗口实时状态</span>
+        <button class="btn btn-secondary btn-small" onclick="wbRefreshGroups()">刷新状态</button>
+      </div>
+      <div id="wbGroupsArea">
+        <div class="empty"><div class="empty-icon">&#128179;</div><div>粘贴账号后点击「拉起下一组 (10个)」</div></div>
+      </div>
+    </div>
+
+  </div><!-- /tab-card -->
+
 </div>
 
 <!-- ═══ 手动改密面板（独立于 Tab，常驻显示） ═══ -->
@@ -834,6 +970,9 @@ function handleMessage(msg) {
     history = msg.history || [];
     renderTasks(); updateSummary(); renderHistory();
     if (msg.running) { document.getElementById('btnStart').style.display='none'; document.getElementById('btnStop').style.display=''; }
+    if (Array.isArray(msg.card_groups) && typeof wbSetGroups === 'function') {
+      wbSetGroups(msg.card_groups);
+    }
   }
   else if (msg.type === 'started') {
     tasks = msg.tasks || {};
@@ -1669,14 +1808,17 @@ function switchTab(tab) {
     b.classList.toggle('active',
       (tab==='browser' && i===0) ||
       (tab==='protocol' && i===1) ||
-      (tab==='outlook' && i===2)
+      (tab==='outlook' && i===2) ||
+      (tab==='card' && i===3)
     );
   });
   document.getElementById('tab-browser').classList.toggle('active', tab==='browser');
   document.getElementById('tab-protocol').classList.toggle('active', tab==='protocol');
   document.getElementById('tab-outlook').classList.toggle('active', tab==='outlook');
+  document.getElementById('tab-card').classList.toggle('active', tab==='card');
   if (tab==='protocol') loadProtoHistory();
   if (tab==='outlook') loadOutlookHistory();
+  if (tab==='card') { wbRenderCountryPreview(); wbUpdatePoolStats(); wbRefreshGroups(); }
 }
 
 // ── Outlook 注册 ──
@@ -1913,7 +2055,28 @@ function parseAccountLines(text) {
 
   for (const line of lines) {
     const l = line.trim();
-    if (!l) continue;
+    if (!l || l.startsWith('#')) continue;
+
+    // 优先处理 ---- 分隔（兼容 2 段与 4 段 OAuth 令牌格式）
+    if (l.includes('----')) {
+      const p4 = l.split('----').map(x => x.trim());
+      if (p4.length >= 4 && singleEmailRegex.test(p4[0]) && p4[1]) {
+        accounts.push({
+          email: p4[0].match(singleEmailRegex)[0],
+          password: p4[1],
+          client_id: p4[2],
+          refresh_token: p4[3],
+        });
+        continue;
+      }
+      if (p4.length >= 2 && singleEmailRegex.test(p4[0]) && p4[1]) {
+        accounts.push({
+          email: p4[0].match(singleEmailRegex)[0],
+          password: p4[1],
+        });
+        continue;
+      }
+    }
 
     const emailMatch = l.match(singleEmailRegex);
     if (!emailMatch) continue;
@@ -2402,10 +2565,475 @@ handleMessage = function(msg) {
   else if (msg.type === 'login_completed') {
     handleLoginCompleted(msg);
   }
+  else if (msg.type === 'card_group_created') {
+    wbUpsertGroup(msg.group, true);
+  }
+  else if (msg.type === 'card_group_ready') {
+    wbUpsertGroup(msg.group, false);
+  }
+  else if (msg.type === 'card_slot_update') {
+    wbUpdateSlot(msg.group_id, msg.slot);
+  }
+  else if (msg.type === 'card_confirm_started') {
+    const g = wbGroups[msg.group_id];
+    if (g) { g.confirming = true; wbRenderGroups(); }
+    wbShowStatus('ok', `第 ${msg.group_id || '全部'} 组开始错峰确认 Confirm (${msg.total} 个窗口)...`);
+  }
+  else if (msg.type === 'card_confirm_done') {
+    const g = wbGroups[msg.group_id];
+    if (g) { g.confirming = false; wbRenderGroups(); }
+    wbShowStatus(msg.success > 0 ? 'ok' : 'warn', `第 ${msg.group_id || '全部'} 组确认完成：成功 ${msg.success}/${msg.total}`);
+  }
+  else if (msg.type === 'card_group_removed') {
+    delete wbGroups[msg.group_id];
+    wbRenderGroups();
+  }
   else {
     _origHandleMessage(msg);
   }
 };
+
+// ── 批量绑卡工作台逻辑 ──
+
+const WB_COUNTRY_CURRENCY = {
+  DE:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR', AT:'EUR', BE:'EUR',
+  IN:'INR', JP:'JPY', GB:'GBP', US:'USD', KR:'KRW', SG:'SGD', CA:'CAD', AU:'AUD', CH:'CHF', BR:'BRL'
+};
+let wbGroups = {};
+let wbCursor = 0;
+
+function wbParseCountries() {
+  const raw = (document.getElementById('wbCountries')?.value || 'DE,IN,JP,GB,US');
+  const list = raw.split(/[\s,;，、]+/).map(x => x.trim().toUpperCase()).filter(Boolean);
+  return list.length ? list : ['DE', 'IN', 'JP', 'GB', 'US'];
+}
+
+function wbSetCountries(str) {
+  document.getElementById('wbCountries').value = str;
+  wbRenderCountryPreview();
+}
+
+function wbRenderCountryPreview() {
+  const countries = wbParseCountries();
+  const size = Math.max(1, Math.min(20, parseInt(document.getElementById('wbGroupSize')?.value) || 10));
+  const chips = [];
+  for (let i = 0; i < size; i++) {
+    const cc = countries[i % countries.length];
+    const cur = WB_COUNTRY_CURRENCY[cc] || '';
+    chips.push(`#${i + 1} <code style="color:var(--accent)">${cc}${cur ? '(' + cur + ')' : ''}</code>`);
+  }
+  const el = document.getElementById('wbCountryPreview');
+  if (el) el.innerHTML = '本组窗口地区分配预览：' + chips.join(' · ');
+  const btn = document.getElementById('btnWbLaunchNext');
+  if (btn) btn.textContent = `拉起下一组 (${size}个)`;
+}
+
+function wbParseOutlookCredMap() {
+  const raw = document.getElementById('wbOutlookTokens')?.value || '';
+  const map = {};
+  for (const line of raw.split('\n')) {
+    const l = line.trim();
+    if (!l || l.startsWith('#')) continue;
+    const parts = l.split('----').map(x => x.trim());
+    if (parts.length >= 4 && parts[0].includes('@') && parts[3]) {
+      map[parts[0].toLowerCase()] = { email: parts[0], password: parts[1], client_id: parts[2], refresh_token: parts[3] };
+    } else if (parts.length === 2 && parts[0].includes('@') && parts[1]) {
+      map[parts[0].toLowerCase()] = { email: parts[0], password: parts[1] };
+    }
+  }
+  return map;
+}
+
+function wbUpdatePoolStats() {
+  const accounts = parseAccountLines(document.getElementById('wbAccounts')?.value || '');
+  const outlookMap = wbParseOutlookCredMap();
+  const size = Math.max(1, Math.min(20, parseInt(document.getElementById('wbGroupSize')?.value) || 10));
+  if (wbCursor > accounts.length) wbCursor = accounts.length;
+  const remaining = Math.max(0, accounts.length - wbCursor);
+  const nextEnd = Math.min(accounts.length, wbCursor + size);
+  const nextText = remaining > 0 ? `下一组将启动 #${wbCursor + 1}~#${nextEnd}` : '已全部启动';
+  const poolEl = document.getElementById('wbPoolStats');
+  if (poolEl) {
+    poolEl.innerHTML = `总账号 <strong>${accounts.length}</strong> | 已启动 <strong>${wbCursor}</strong> | 剩余 <strong>${remaining}</strong>（${nextText}）`;
+  }
+  let matched = 0;
+  for (const a of accounts) {
+    const em = a.email.toLowerCase();
+    if (outlookMap[em] || (a.refresh_token && a.client_id)) matched++;
+  }
+  const matchEl = document.getElementById('wbOutlookMatchStats');
+  if (matchEl) {
+    matchEl.innerHTML = `已匹配邮箱令牌 <strong style="color:${matched > 0 ? 'var(--success)' : 'var(--muted)'}">${matched}</strong> / ${accounts.length} 个`;
+  }
+}
+
+function wbResetCursor() {
+  wbCursor = 0;
+  wbUpdatePoolStats();
+  wbShowStatus('ok', '已重置启动进度，下次点击将从第 1 个账号开始');
+}
+
+function wbClearAccounts() {
+  document.getElementById('wbAccounts').value = '';
+  wbCursor = 0;
+  wbUpdatePoolStats();
+}
+
+async function wbImportHistory(source) {
+  let list = [];
+  try {
+    if (source === 'proto') {
+      const r = await fetch('/api/proto/history');
+      list = await r.json();
+    } else if (source === 'outlook') {
+      const r = await fetch('/api/outlook/history');
+      list = await r.json();
+    } else {
+      list = history || [];
+    }
+  } catch (e) {
+    alert('获取历史失败: ' + e.message);
+    return;
+  }
+  if (!Array.isArray(list) || !list.length) {
+    wbShowStatus('warn', '该分类暂无历史账号');
+    return;
+  }
+  const lines = list
+    .map(item => `${item.jb_email || item.email || ''}----${item.password || ''}`)
+    .filter(l => l.includes('@') && !l.endsWith('----'));
+  const box = document.getElementById('wbAccounts');
+  const existing = box.value.trim();
+  box.value = existing ? (existing + '\n' + lines.join('\n')) : lines.join('\n');
+  wbUpdatePoolStats();
+  wbShowStatus('ok', `已导入 ${lines.length} 个账号`);
+}
+
+async function wbTestFirstOutlook() {
+  const map = wbParseOutlookCredMap();
+  const keys = Object.keys(map);
+  const div = document.getElementById('wbOutlookTestResult');
+  if (!keys.length) {
+    div.style.display = 'block';
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--error)';
+    div.textContent = '请先在右侧填入至少一条 Outlook 凭证/令牌';
+    return;
+  }
+  const cred = map[keys[0]];
+  div.style.display = 'block';
+  div.style.background = 'rgba(0,120,212,.12)';
+  div.style.color = '#4da6ff';
+  div.textContent = `正在测试 ${cred.email} ...`;
+  try {
+    const r = await fetch('/api/outlook/test-imap', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(cred)
+    });
+    const d = await r.json();
+    div.style.background = d.ok ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)';
+    div.style.color = d.ok ? 'var(--success)' : 'var(--error)';
+    div.textContent = (d.ok ? '✓ ' : '✗ ') + cred.email + '：' + d.message;
+  } catch (e) {
+    div.style.background = 'rgba(239,68,68,.12)';
+    div.style.color = 'var(--error)';
+    div.textContent = '测试请求失败: ' + e;
+  }
+}
+
+function wbRandomCardName() {
+  const firsts = ['JAMES','JOHN','ROBERT','MICHAEL','DAVID','ALEX','DANIEL','EMILY','SOPHIA','OLIVIA'];
+  const lasts = ['SMITH','MILLER','BROWN','TAYLOR','WILSON','CLARK','HALL','LEWIS','WALKER','YOUNG'];
+  document.getElementById('wbCardName').value =
+    firsts[Math.floor(Math.random() * firsts.length)] + ' ' + lasts[Math.floor(Math.random() * lasts.length)];
+}
+
+async function wbLaunchNextGroup() {
+  const accounts = parseAccountLines(document.getElementById('wbAccounts').value || '');
+  if (!accounts.length) {
+    alert('请先在 Step 1 粘贴至少一个 JetBrains 账号');
+    return;
+  }
+  if (wbCursor >= accounts.length) {
+    if (confirm(`账号池中的 ${accounts.length} 个账号已全部启动。是否重置进度从第 1 个重新开始？`)) {
+      wbCursor = 0;
+    } else {
+      return;
+    }
+  }
+
+  const size = Math.max(1, Math.min(20, parseInt(document.getElementById('wbGroupSize').value) || 10));
+  const batch = accounts.slice(wbCursor, wbCursor + size);
+  const countries = wbParseCountries();
+  const workers = Math.max(1, Math.min(15, parseInt(document.getElementById('wbWorkers').value) || 5));
+  const browser = document.getElementById('wbBrowser').value;
+  const outlookTokens = document.getElementById('wbOutlookTokens').value || '';
+
+  const btn = document.getElementById('btnWbLaunchNext');
+  btn.disabled = true;
+  try {
+    const resp = await fetch('/api/card-workbench/launch-group', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        accounts: batch,
+        outlook_credentials: outlookTokens,
+        countries: countries,
+        browser: browser,
+        workers: workers,
+        auto_tokens: true,
+      })
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      wbCursor += batch.length;
+      wbUpdatePoolStats();
+      if (data.group) wbUpsertGroup(data.group, true);
+      wbShowStatus('ok', data.message);
+    } else {
+      wbShowStatus('err', data.error || '启动失败');
+    }
+  } catch (e) {
+    wbShowStatus('err', '启动请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function wbRefreshGroups() {
+  try {
+    const r = await fetch('/api/card-workbench/groups');
+    const d = await r.json();
+    if (d.ok) wbSetGroups(d.groups || []);
+  } catch (e) {}
+}
+
+function wbSetGroups(list) {
+  wbGroups = {};
+  (list || []).forEach(g => { wbGroups[g.group_id] = g; });
+  wbRenderGroupSelector();
+  wbRenderGroups();
+}
+
+function wbUpsertGroup(group, selectIt) {
+  if (!group) return;
+  wbGroups[group.group_id] = group;
+  wbRenderGroupSelector(selectIt ? group.group_id : null);
+  wbRenderGroups();
+}
+
+function wbUpdateSlot(groupId, slot) {
+  const g = wbGroups[groupId];
+  if (!g || !slot) return;
+  g.slots[slot.slot_index] = slot;
+  wbRenderGroups();
+}
+
+function wbRenderGroupSelector(preferId) {
+  const sel = document.getElementById('wbTargetGroup');
+  if (!sel) return;
+  const curVal = preferId != null ? String(preferId) : sel.value;
+  const ids = Object.keys(wbGroups).map(Number).sort((a,b) => a - b);
+  sel.innerHTML = '<option value="0">所有活动组 (' + ids.length + '组)</option>';
+  for (const id of ids) {
+    const g = wbGroups[id];
+    const opt = document.createElement('option');
+    opt.value = String(id);
+    const ready = (g.slots || []).filter(s => s.ok && s.stage !== 'closed').length;
+    opt.textContent = `${g.name} (${ready}/${(g.slots || []).length} 存活)`;
+    if (String(id) === curVal) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+function wbStageStyle(slot) {
+  const st = slot.stage || '';
+  if (slot.need_otp || st === 'need_otp') return { color: 'var(--warning)', badge: '需手动OTP' };
+  if (st === '3ds' || st === 'submitted' || st === 'submitting') return { color: 'var(--success)', badge: st === '3ds' ? '进入3DS' : '已确认' };
+  if (st === 'card_filled') return { color: '#38bdf8', badge: '已填卡' };
+  if (st === 'card_ready' || st === 'add_card_clicked' || st === 'logged_in') return { color: '#10b981', badge: '弹窗就绪' };
+  if (st === 'confirming' || st === 'filling') return { color: 'var(--accent)', badge: st === 'confirming' ? '确认中...' : '填卡中...' };
+  if (st === 'failed' || st === 'error' || st === 'disabled' || st === 'no_response' || st === 'fill_failed') return { color: 'var(--error)', badge: '异常' };
+  if (st === 'closed') return { color: 'var(--muted)', badge: '已关闭' };
+  return { color: 'var(--muted)', badge: '启动中' };
+}
+
+function wbRenderGroups() {
+  const area = document.getElementById('wbGroupsArea');
+  if (!area) return;
+  const ids = Object.keys(wbGroups).map(Number).sort((a,b) => b - a); // 最新组排最上
+  if (!ids.length) {
+    area.innerHTML = '<div class="empty"><div class="empty-icon">&#128179;</div><div>粘贴账号后点击「拉起下一组 (10个)」</div></div>';
+    wbRenderGroupSelector();
+    return;
+  }
+  wbRenderGroupSelector();
+
+  let html = '';
+  for (const gid of ids) {
+    const g = wbGroups[gid];
+    const slots = g.slots || [];
+    const aliveCount = slots.filter(s => s.ok && s.stage !== 'closed').length;
+    const confirmedCount = slots.filter(s => ['3ds','submitted','submitting'].includes(s.stage)).length;
+    const otpCount = slots.filter(s => s.need_otp).length;
+
+    html += `<div class="panel" style="padding:16px;margin-bottom:16px;background:var(--bg);border-color:${g.confirming ? 'var(--success)' : 'var(--border)'}">`;
+    html += `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">`;
+    html += `<div style="font-weight:700;font-size:14px">${esc(g.name)} <span style="font-size:12px;color:var(--muted);font-weight:400">(${esc(g.created_at || '')}) · 存活 ${aliveCount}/${slots.length} · 已确认 ${confirmedCount}/${slots.length}${otpCount ? ' · <span style="color:var(--warning)">待OTP ' + otpCount + '</span>' : ''}</span></div>`;
+    html += `<div style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-small" onclick="document.getElementById('wbTargetGroup').value='${gid}'">选中此组</button>
+      <button class="btn btn-primary btn-small" onclick="wbFillGroup(${gid})">填卡</button>
+      <button class="btn btn-primary btn-small" style="background:var(--success)" onclick="wbConfirmGroup(${gid})" ${g.confirming ? 'disabled' : ''}>${g.confirming ? '确认中...' : '错峰确认'}</button>
+      <button class="btn btn-secondary btn-small" style="border-color:var(--error);color:var(--error)" onclick="wbCloseGroup(${gid}, 0, true)">关闭并移除</button>
+    </div></div>`;
+
+    html += `<table class="history-table" style="margin-top:4px"><thead><tr>
+      <th style="width:36px">#</th><th style="width:66px">端口</th><th>邮箱</th><th style="width:90px">地区·货币</th><th>状态 / 消息</th><th style="width:155px">操作</th>
+    </tr></thead><tbody>`;
+
+    slots.forEach((s, idx) => {
+      if (slots.length > 5 && idx === 5) {
+        html += `<tr><td colspan="6" style="padding:4px 12px;background:rgba(99,102,241,.08);color:var(--accent);font-size:11px;font-weight:600">── 后半组（第 6 ~ ${slots.length} 个窗口，第二轮货币）──</td></tr>`;
+      }
+      const stInfo = wbStageStyle(s);
+      const cur = s.currency ? ` · ${s.currency}` : '';
+      let statusHtml = `<span style="color:${stInfo.color};font-weight:600">[${stInfo.badge}]</span> <span style="color:var(--muted);font-size:12px">${esc(s.message || '')}</span>`;
+      if (s.need_otp) {
+        statusHtml += `<div style="margin-top:6px;display:flex;gap:6px;align-items:center">
+          <input type="text" id="wbOtpInput_${gid}_${s.slot_index}" placeholder="输入6位验证码" maxlength="8" style="width:125px;padding:4px 8px;background:var(--card);border:1px solid var(--warning);border-radius:5px;color:var(--text);font-family:Consolas,monospace;font-size:12px">
+          <button class="btn btn-primary btn-small" style="padding:4px 10px" onclick="wbSubmitOtp(${gid},${s.slot_index})">提交</button>
+          <button class="btn btn-secondary btn-small" style="padding:4px 8px" onclick="wbResendOtp(${gid},${s.slot_index})">重发</button>
+        </div>`;
+      }
+      const alive = s.ok && s.stage !== 'closed';
+      html += `<tr>
+        <td>${idx + 1}</td>
+        <td class="mono">:${s.port || '-'}</td>
+        <td class="mono" style="max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(s.email)}">${esc(s.email)}</td>
+        <td><code style="color:var(--accent)">${esc(s.country || '')}${esc(cur)}</code></td>
+        <td>${statusHtml}</td>
+        <td>
+          <button class="copy-btn" onclick="wbFillGroup(${gid},${s.port})" ${alive ? '' : 'disabled'}>填</button>
+          <button class="copy-btn" onclick="wbConfirmGroup(${gid},${s.port})" ${alive ? '' : 'disabled'}>确认</button>
+          <button class="copy-btn" style="color:var(--error)" onclick="wbCloseGroup(${gid},${s.port},false)">关</button>
+        </td>
+      </tr>`;
+    });
+
+    html += `</tbody></table></div>`;
+  }
+  area.innerHTML = html;
+}
+
+async function wbSubmitOtp(gid, slotIndex) {
+  const inp = document.getElementById(`wbOtpInput_${gid}_${slotIndex}`);
+  const code = (inp?.value || '').trim();
+  if (!code) { alert('请输入验证码'); return; }
+  const r = await fetch('/api/card-workbench/submit-otp', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ group_id: gid, slot_index: slotIndex, code: code })
+  });
+  const d = await r.json();
+  if (!d.ok) wbShowStatus('err', d.error || '提交失败');
+}
+
+async function wbResendOtp(gid, slotIndex) {
+  const r = await fetch('/api/card-workbench/resend-otp', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ group_id: gid, slot_index: slotIndex })
+  });
+  const d = await r.json();
+  wbShowStatus(d.ok ? 'ok' : 'err', d.message || d.error || '');
+}
+
+async function wbFillGroup(overrideGid, overridePort) {
+  const gid = overrideGid != null ? overrideGid : (parseInt(document.getElementById('wbTargetGroup').value) || 0);
+  const port = overridePort || 0;
+  const cardNumber = document.getElementById('wbCardNumber').value.replace(/\s/g, '');
+  const expiry = document.getElementById('wbCardExpiry').value.trim();
+  const cvv = document.getElementById('wbCardCvv').value.trim();
+  const cardName = document.getElementById('wbCardName').value.trim();
+  if (!cardNumber) { wbShowStatus('err', '请先输入卡号'); return; }
+
+  const btn = document.getElementById('btnWbFill');
+  btn.disabled = true; btn.textContent = '填卡中...';
+  try {
+    const r = await fetch('/api/card-workbench/fill-group', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ group_id: gid, port: port, card_number: cardNumber, expiry_date: expiry, cvv: cvv, card_name: cardName })
+    });
+    const d = await r.json();
+    wbShowStatus(d.ok ? 'ok' : 'err', d.message || d.error || '填卡失败');
+  } catch (e) {
+    wbShowStatus('err', '填卡请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = '一键填卡 (选中组)';
+  }
+}
+
+async function wbClearGroup() {
+  const gid = parseInt(document.getElementById('wbTargetGroup').value) || 0;
+  const btn = document.getElementById('btnWbClear');
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/card-workbench/clear-group', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ group_id: gid, port: 0 })
+    });
+    const d = await r.json();
+    wbShowStatus(d.ok ? 'ok' : 'err', d.message || d.error || '清空失败');
+  } catch (e) {
+    wbShowStatus('err', '清空请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function wbConfirmGroup(overrideGid, overridePort) {
+  const gid = overrideGid != null ? overrideGid : (parseInt(document.getElementById('wbTargetGroup').value) || 0);
+  const port = overridePort || 0;
+  const dMin = Math.max(0.5, Math.min(3.0, parseFloat(document.getElementById('wbDelayMin')?.value) || 0.8));
+  const dMax = Math.max(dMin, Math.min(3.0, parseFloat(document.getElementById('wbDelayMax')?.value) || 2.0));
+  try {
+    const r = await fetch('/api/card-workbench/confirm-group', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ group_id: gid, port: port, delay_min: dMin, delay_max: dMax })
+    });
+    const d = await r.json();
+    wbShowStatus(d.ok ? 'ok' : 'err', d.message || d.error || '确认启动失败');
+  } catch (e) {
+    wbShowStatus('err', '确认请求失败: ' + e.message);
+  }
+}
+
+async function wbCloseGroup(overrideGid, overridePort, removeCard) {
+  const gid = overrideGid != null ? overrideGid : (parseInt(document.getElementById('wbTargetGroup').value) || 0);
+  const port = overridePort || 0;
+  try {
+    const r = await fetch('/api/card-workbench/close-group', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ group_id: gid, port: port, remove: !!removeCard })
+    });
+    const d = await r.json();
+    wbShowStatus(d.ok ? 'ok' : 'err', d.message || d.error || '');
+  } catch (e) {
+    wbShowStatus('err', '关闭请求失败: ' + e.message);
+  }
+}
+
+function wbShowStatus(type, msg) {
+  const el = document.getElementById('wbActionStatus');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.color = type === 'ok' ? 'var(--success)' : type === 'warn' ? 'var(--warning)' : 'var(--error)';
+  el.textContent = msg;
+}
+
+document.getElementById('wbCardExpiry')?.addEventListener('input', function() {
+  let v = this.value.replace(/[^\d]/g, '');
+  if (v.length >= 3) v = v.slice(0, 2) + '/' + v.slice(2, 4);
+  this.value = v;
+});
 
 async function loadBrowserPath() {
   try {
@@ -2452,6 +3080,8 @@ loadBrowserPath();
 loadCaptchaConfig();
 loadCountries();
 cfLoadSettings();
+wbRenderCountryPreview();
+wbUpdatePoolStats();
 connectWS();
 </script>
 </body>

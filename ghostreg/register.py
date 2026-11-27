@@ -1461,23 +1461,27 @@ def _wait_tokens_page_ready(tab, timeout: int = 45):
     return False
 
 
-def _setup_tokens_page(tab, country_code: str = "JP") -> bool:
-    """注册成功后：导航到 tokens 页 → 选国家 → 点 Add credit card"""
-    logger.info(f"[Step 8] 跳转到 tokens 页（国家={country_code}）...")
+def _setup_tokens_page_ex(tab, country_code: str = "JP", skip_initial_wait: bool = False) -> dict:
+    """
+    登录后/注册后：导航到 tokens 页 → 选国家 → 点 Add credit card 并等待绑卡表单就绪。
+    返回 {"ok": bool, "stage": str, "country": str, "message": str}
+    """
+    cc = (country_code or "JP").upper()
+    logger.info(f"[Step 8] 跳转到 tokens 页（国家={cc}）...")
 
-    # 注册完成后等一下让 session 同步（刚创建的账号 session 可能还没完全生效）
-    time.sleep(3)
+    if not skip_initial_wait:
+        # 注册完成后等一下让 session 同步（刚创建的账号 session 可能还没完全生效）
+        time.sleep(3)
 
-    # 先检查当前页面状态——如果 Create account 后还在 signup 页，
-    # 说明注册可能还没完成跳转，等一下
-    for pre_wait in range(10):
-        try:
-            cur = (tab.url or "").lower()
-            if "signup" not in cur:
+        # 先检查当前页面状态——如果 Create account 后还在 signup 页，等待完成跳转
+        for _pre_wait in range(10):
+            try:
+                cur = (tab.url or "").lower()
+                if "signup" not in cur:
+                    break
+            except Exception:
                 break
-        except Exception:
-            break
-        time.sleep(2)
+            time.sleep(2)
 
     for nav_attempt in range(3):
         try:
@@ -1485,26 +1489,25 @@ def _setup_tokens_page(tab, country_code: str = "JP") -> bool:
             tab.wait.doc_loaded(timeout=30)
         except Exception as e:
             logger.warning(f"[Step 8] 导航失败 (attempt {nav_attempt + 1}): {e}")
-        time.sleep(3)
+        time.sleep(1.8 if skip_initial_wait else 3.0)
 
         # 处理 Cookie 弹窗
         try:
-            accept_btn = tab.ele("text:Accept All", timeout=3)
+            accept_btn = tab.ele("text:Accept All", timeout=2)
             if accept_btn:
                 accept_btn.click()
-                time.sleep(0.5)
+                time.sleep(0.4)
         except Exception:
             pass
 
         # 检查是否被重定向到登录页
-        # login 页可能会自动完成 OAuth 回调跳转，等待最多 15s
         redirected_to_login = False
         try:
             current_url = (tab.url or "").lower()
             if "login" in current_url or "signup" in current_url:
                 redirected_to_login = True
                 logger.warning(f"[Step 8] 被重定向到 {current_url}，等待自动登录回调...")
-                for login_wait in range(10):
+                for _login_wait in range(8):
                     time.sleep(1.5)
                     try:
                         new_url = (tab.url or "").lower()
@@ -1519,146 +1522,241 @@ def _setup_tokens_page(tab, country_code: str = "JP") -> bool:
 
         if redirected_to_login:
             logger.warning(f"[Step 8] 仍在 login 页，重试导航 ({nav_attempt + 1}/3)...")
-            time.sleep(3)
+            time.sleep(2)
             continue
 
-        # 等待 SPA 内容渲染
-        ready = _wait_tokens_page_ready(tab)
+        ready = _wait_tokens_page_ready(tab, timeout=30 if skip_initial_wait else 45)
         if ready:
             break
         if nav_attempt < 2:
             logger.info(f"[Step 8] 页面未就绪，重新导航 (attempt {nav_attempt + 2}/3)...")
     else:
-        logger.warning("[Step 8] 3 次导航后 tokens 页面仍未就绪，跳过 Step 8")
+        return {"ok": False, "stage": "nav_failed", "country": cc, "message": "tokens 页面加载超时"}
 
-    # 第一步：点击 "Select country" 链接
-    try:
-        select_link = (
-            tab.ele("text:Select country", timeout=5)
-            or tab.ele("text:Select", timeout=3)
-        )
-        if select_link:
-            select_link.click()
-            logger.info("[Step 8] 已点击 Select country")
-            time.sleep(2)
-    except Exception as e:
-        logger.info(f"[Step 8] 未找到 Select country（可能已设置）: {e}")
-
-    # 第二步：选国家（JS 设置 select 值 + 触发事件）
-    selected = 'no_select'
-    cc = country_code.upper()
-    for country_attempt in range(5):
+    # 快速探测当前页面 DOM 状态（已打开弹窗 / 待点 Add credit card / 待选国家）
+    def _probe_tokens_dom() -> dict:
         try:
-            selected = tab.run_js(f"""
-                const sel = document.querySelector('select[name="country"]');
-                if (!sel) return 'no_select';
-                sel.value = '{cc}';
-                sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-                const opt = sel.querySelector('option[value="{cc}"]');
-                const name = opt ? opt.textContent.trim() : '{cc}';
-                const chosenSpan = document.querySelector('.chosen-single span');
-                if (chosenSpan) chosenSpan.textContent = name;
-                try {{
-                    if (window.jQuery) {{
-                        jQuery('select[name="country"]').val('{cc}').trigger('chosen:updated').trigger('change');
-                    }}
-                }} catch(e) {{}}
-                return sel.value;
+            res = tab.run_js("""
+                const isVis = (el) => {
+                    if (!el) return false;
+                    const st = getComputedStyle(el);
+                    if (st.display === 'none' || st.visibility === 'hidden') return false;
+                    const r = el.getBoundingClientRect();
+                    return r.width > 0 && r.height > 0;
+                };
+                const btns = Array.from(document.querySelectorAll('a, button'));
+                const selectCountry = btns.find(el => isVis(el) && /select\\s+country/i.test(el.textContent || ''));
+                const addCard = btns.find(el => isVis(el) && /add\\s+credit\\s+card/i.test(el.textContent || ''));
+                const countrySel = document.querySelector('select[name="country"]');
+                const cardIframe = document.querySelector('iframe[title*="card number" i], iframe[src*="adyen" i]');
+                const holderInput = document.querySelector('input[name="holderName"]');
+                return {
+                    hasSelectCountry: !!selectCountry,
+                    hasCountrySelect: !!countrySel,
+                    hasAddCard: !!addCard,
+                    hasCardModal: !!(cardIframe || (holderInput && isVis(holderInput))),
+                };
             """)
-            if selected and selected != 'no_select':
-                break
+            return res if isinstance(res, dict) else {}
         except Exception:
-            pass
-        if country_attempt < 4:
-            logger.info(f"[Step 8] select 元素未就绪，等待重试 ({country_attempt + 1}/5)...")
-            time.sleep(2)
+            return {}
 
-    logger.info(f"[Step 8] 国家选择结果: {selected}")
+    probe = _probe_tokens_dom()
+    if probe.get("hasCardModal"):
+        return {"ok": True, "stage": "card_ready", "country": cc, "message": f"绑卡弹窗已就绪 ({cc})"}
 
-    if selected != cc:
-        # 通过 Chosen UI 下拉搜索选择
-        country_name = _get_country_name(cc)
+    country_already_set = False
+    # 第一步：点击 "Select country"（若未展开选择框且存在该链接）
+    if not probe.get("hasCountrySelect") and probe.get("hasSelectCountry"):
         try:
-            chosen = tab.ele(".chosen-container .chosen-single", timeout=3)
-            if chosen:
-                chosen.click()
-                time.sleep(0.5)
-                search = tab.ele(".chosen-container .chosen-search input", timeout=3)
-                if search:
-                    search.input(country_name)
-                    time.sleep(0.5)
-                    result_item = tab.ele(".chosen-results li", timeout=3)
-                    if result_item and country_name.lower() in (result_item.text or "").lower():
-                        result_item.click()
-                        logger.info(f"[Step 8] 通过 Chosen UI 选择了 {country_name}")
-                        time.sleep(0.5)
+            select_link = (
+                tab.ele("text:Select country", timeout=3)
+                or tab.ele("text:Select", timeout=2)
+            )
+            if select_link:
+                select_link.click()
+                logger.info("[Step 8] 已点击 Select country")
+                time.sleep(1.5)
         except Exception as e:
-            logger.warning(f"[Step 8] Chosen UI 操作失败: {e}")
+            logger.info(f"[Step 8] 点击 Select country 异常: {e}")
+        probe = _probe_tokens_dom()
+    elif not probe.get("hasCountrySelect") and not probe.get("hasSelectCountry") and probe.get("hasAddCard"):
+        # 账号此前已设置过地区，页面直接展示 Add credit card
+        country_already_set = True
+        logger.info("[Step 8] 未见 Select country，账号可能已设置地区，直接准备打开 Add credit card")
 
-    # 第三步：点击 Save
-    save_clicked = False
-    try:
-        save_btn = tab.ele("text:Save", timeout=5)
-        if save_btn:
-            save_btn.click()
-            save_clicked = True
-            logger.info("[Step 8] 已点击 Save")
-            time.sleep(3)
-    except Exception:
-        pass
-
-    if not save_clicked:
-        try:
-            tab.run_js("""
-                const modals = document.querySelectorAll('.modal');
-                for (const m of modals) {
-                    if (m.classList.contains('in') || m.style.display === 'block' || getComputedStyle(m).display !== 'none') {
-                        const btn = m.querySelector('button.btn-primary');
-                        if (btn && btn.textContent.trim() === 'Save') { btn.click(); return; }
-                    }
-                }
-                const allSave = document.querySelectorAll('button.btn-primary');
-                for (const b of allSave) {
-                    if (b.textContent.trim() === 'Save' && b.offsetParent !== null) { b.click(); return; }
-                }
-            """)
-            logger.info("[Step 8] JS 兜底点击 Save")
-            time.sleep(2)
-        except Exception as e:
-            logger.warning(f"[Step 8] 点击 Save 失败: {e}")
-
-    time.sleep(1.5)
-
-    # 第四步：点击 "Add credit card"
-    try:
-        tab.wait.doc_loaded(timeout=15)
-        time.sleep(1.5)
-
-        for attempt in range(10):
+    # 第二步：若需要选国家，设置国家并点 Save
+    if not country_already_set:
+        selected = "no_select"
+        for country_attempt in range(5):
             try:
-                add_card = tab.ele("text:Add credit card", timeout=2)
-                if add_card:
-                    add_card.click()
-                    logger.info("[Step 8] 已点击 Add credit card")
-                    time.sleep(2)
-                    return True
+                selected = tab.run_js(f"""
+                    const sel = document.querySelector('select[name="country"]');
+                    if (!sel) return 'no_select';
+                    sel.value = '{cc}';
+                    sel.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    const opt = sel.querySelector('option[value="{cc}"]');
+                    const name = opt ? opt.textContent.trim() : '{cc}';
+                    const chosenSpan = document.querySelector('.chosen-single span');
+                    if (chosenSpan) chosenSpan.textContent = name;
+                    try {{
+                        if (window.jQuery) {{
+                            jQuery('select[name="country"]').val('{cc}').trigger('chosen:updated').trigger('change');
+                        }}
+                    }} catch(e) {{}}
+                    return sel.value;
+                """)
+                if selected and selected != "no_select":
+                    break
             except Exception:
                 pass
-            time.sleep(1.5)
+            if country_attempt < 4:
+                time.sleep(1.5)
 
-        # JS 兜底
-        tab.run_js("""
-            const links = document.querySelectorAll('a, button');
-            for (const l of links) {
-                if ((l.textContent||'').trim().includes('Add credit card')) { l.click(); return; }
-            }
-        """)
-        logger.info("[Step 8] JS 兜底点击 Add credit card")
-        time.sleep(2)
-        return True
+        logger.info(f"[Step 8] 国家选择结果: {selected}")
+
+        if selected != cc and selected != "no_select":
+            country_name = _get_country_name(cc)
+            try:
+                chosen = tab.ele(".chosen-container .chosen-single", timeout=3)
+                if chosen:
+                    chosen.click()
+                    time.sleep(0.4)
+                    search = tab.ele(".chosen-container .chosen-search input", timeout=3)
+                    if search:
+                        search.input(country_name)
+                        time.sleep(0.4)
+                        result_item = tab.ele(".chosen-results li", timeout=3)
+                        if result_item and country_name.lower() in (result_item.text or "").lower():
+                            result_item.click()
+                            logger.info(f"[Step 8] 通过 Chosen UI 选择了 {country_name}")
+                            time.sleep(0.4)
+            except Exception as e:
+                logger.warning(f"[Step 8] Chosen UI 操作失败: {e}")
+
+        if selected != "no_select":
+            # 第三步：点击模态框中的 Save 按钮
+            save_clicked = False
+            try:
+                js_res = tab.run_js("""
+                    const isVis = (el) => {
+                        if (!el) return false;
+                        const st = getComputedStyle(el);
+                        if (st.display === 'none' || st.visibility === 'hidden') return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    };
+                    const modals = document.querySelectorAll('.modal, [role="dialog"]');
+                    for (const m of modals) {
+                        if (isVis(m)) {
+                            const btns = m.querySelectorAll('button');
+                            for (const b of btns) {
+                                if (isVis(b) && (b.textContent || '').trim() === 'Save') {
+                                    b.click();
+                                    return 'modal_save';
+                                }
+                            }
+                        }
+                    }
+                    const allBtns = document.querySelectorAll('button.btn-primary, button[type="submit"]');
+                    for (const b of allBtns) {
+                        if (isVis(b) && (b.textContent || '').trim() === 'Save') {
+                            b.click();
+                            return 'global_save';
+                        }
+                    }
+                    return '';
+                """)
+                if js_res:
+                    save_clicked = True
+                    logger.info(f"[Step 8] 已点击 Save ({js_res})")
+            except Exception:
+                pass
+
+            if not save_clicked:
+                try:
+                    save_btn = tab.ele("tag:button@@text():Save", timeout=4)
+                    if save_btn:
+                        save_btn.click()
+                        save_clicked = True
+                        logger.info("[Step 8] DrissionPage 点击 Save")
+                except Exception as e:
+                    logger.warning(f"[Step 8] 点击 Save 失败: {e}")
+
+            if save_clicked:
+                # 等待国家弹窗关闭 / Add credit card 出现
+                for _w in range(12):
+                    time.sleep(0.8)
+                    p2 = _probe_tokens_dom()
+                    if p2.get("hasAddCard") or not p2.get("hasCountrySelect"):
+                        break
+
+    # 第四步：点击 "Add credit card" 并等待 Adyen 表单 iframe 挂载
+    try:
+        try:
+            tab.wait.doc_loaded(timeout=10)
+        except Exception:
+            pass
+
+        clicked_add = False
+        for _attempt in range(10):
+            try:
+                p_now = _probe_tokens_dom()
+                if p_now.get("hasCardModal"):
+                    return {"ok": True, "stage": "card_ready", "country": cc, "message": f"绑卡弹窗已就绪 ({cc})"}
+                js_click = tab.run_js("""
+                    const isVis = (el) => {
+                        if (!el) return false;
+                        const st = getComputedStyle(el);
+                        if (st.display === 'none' || st.visibility === 'hidden') return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    };
+                    const links = document.querySelectorAll('a, button');
+                    for (const l of links) {
+                        if (isVis(l) && /add\\s+credit\\s+card/i.test(l.textContent || '')) {
+                            l.scrollIntoView({block: 'center'});
+                            l.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                """)
+                if js_click:
+                    clicked_add = True
+                    logger.info("[Step 8] 已点击 Add credit card")
+                    break
+            except Exception:
+                pass
+            time.sleep(1.2)
+
+        if not clicked_add:
+            add_card = tab.ele("text:Add credit card", timeout=3)
+            if add_card:
+                add_card.click()
+                clicked_add = True
+
+        if not clicked_add:
+            return {"ok": False, "stage": "no_add_card", "country": cc, "message": "未找到 Add credit card 按钮"}
+
+        # 等待卡号 iframe 或 holderName 出现
+        for _mw in range(16):
+            time.sleep(0.5)
+            p_modal = _probe_tokens_dom()
+            if p_modal.get("hasCardModal"):
+                suffix = " (账号已有地区)" if country_already_set else ""
+                return {"ok": True, "stage": "card_ready", "country": cc, "message": f"已进入绑卡弹窗 ({cc}){suffix}"}
+
+        return {"ok": True, "stage": "add_card_clicked", "country": cc, "message": f"已点击 Add credit card ({cc})，表单加载中"}
     except Exception as e:
         logger.warning(f"[Step 8] 点击 Add credit card 失败: {e}")
-        return False
+        return {"ok": False, "stage": "add_card_failed", "country": cc, "message": f"打开绑卡弹窗失败: {e}"}
+
+
+def _setup_tokens_page(tab, country_code: str = "JP") -> bool:
+    """注册成功后：导航到 tokens 页 → 选国家 → 点 Add credit card（兼容旧接口返回 bool）"""
+    res = _setup_tokens_page_ex(tab, country_code=country_code, skip_initial_wait=False)
+    return bool(res.get("ok"))
 
 
 # ═══════════════════════════════════════════════════════════
@@ -2028,6 +2126,40 @@ def connect_browser_by_port(port: int):
     return browser
 
 
+_port_alloc_lock = threading.Lock()
+_reserved_ports: set[int] = set()
+
+
+def allocate_debug_ports(count: int) -> list[int]:
+    """线程安全地分配不冲突的 debug 端口号（同时避开已运行与正在启动中的端口）"""
+    with _port_alloc_lock:
+        existing = scan_debug_browsers()
+        used_ports = {b["port"] for b in existing} | set(_reserved_ports)
+        next_port = max(used_ports, default=9699) + 1
+        ports = [next_port + i for i in range(count)]
+        _reserved_ports.update(ports)
+        return ports
+
+
+def release_debug_port(port: int):
+    """释放预留端口"""
+    with _port_alloc_lock:
+        _reserved_ports.discard(port)
+
+
+def close_browser_by_port(port: int) -> bool:
+    """按 debug 端口关闭单个浏览器窗口"""
+    release_debug_port(port)
+    try:
+        browser = connect_browser_by_port(port)
+        browser.quit()
+        logger.info(f"[CloseBrowser] 已关闭端口 {port}")
+        return True
+    except Exception as e:
+        logger.warning(f"[CloseBrowser] 关闭端口 {port} 失败: {e}")
+        return False
+
+
 def _open_single_browser(port: int, browser_type: str, url: str) -> dict:
     """打开单个浏览器窗口（供并发调用）"""
     try:
@@ -2052,6 +2184,7 @@ def _open_single_browser(port: int, browser_type: str, url: str) -> dict:
         return {"port": port, "ok": True, "message": f"已打开 (端口 {port})"}
 
     except Exception as e:
+        release_debug_port(port)
         logger.warning(f"[OpenBrowser] 打开浏览器失败 端口={port}: {e}")
         return {"port": port, "ok": False, "message": str(e)}
 
@@ -2068,11 +2201,7 @@ def open_browsers(count: int = 1, browser_type: str = "chrome", url: str = "") -
     Returns:
         [{"port": int, "ok": True/False, "message": str}, ...]
     """
-    # 扫描已占用的端口，从最大端口 +1 开始分配
-    existing = scan_debug_browsers()
-    used_ports = {b["port"] for b in existing}
-    next_port = max(used_ports, default=9699) + 1
-    ports = [next_port + i for i in range(count)]
+    ports = allocate_debug_ports(count)
 
     if count == 1:
         # 单个直接打开，不走线程池
@@ -2383,18 +2512,32 @@ _JB_LOGIN_HEADERS = {
 
 
 def _proto_login(email: str, password: str,
-                  worker_url: str = "", ladder_proxy: str = "") -> dict:
+                  worker_url: str = "", ladder_proxy: str = "",
+                  outlook_cred: dict | None = None,
+                  otp_timeout: float = 120.0,
+                  status_cb=None,
+                  manual_otp_fn=None,
+                  resend_holder: dict | None = None) -> dict:
     """
-    纯 HTTP 协议登录 JetBrains 账号（4 步，无浏览器）。
+    纯 HTTP 协议登录 JetBrains 账号（支持 PASSWORD_REQUIRED + EMAIL_OTP_REQUIRED）。
 
     支持通过 CF Worker 代理，避免多账号并发时被 /api/auth/sessions 的 IP 限流（429）。
+    遇到 EMAIL_OTP_REQUIRED 时自动按 Outlook(令牌/IMAP) → YYDS → NiMail → 手动输入 接码。
 
     Returns:
-        {"ok": bool, "cookies": {name: value}, "message": str}
+        {"ok": bool, "cookies": {name: value}, "message": str, "otp_method": str}
     """
     import sys as _sys
     _sys.path.insert(0, str(Path(__file__).parent.parent))
     from protocol_reg.client import new_session
+    from . import login_otp
+
+    def _emit(stage: str, msg: str):
+        if status_cb:
+            try:
+                status_cb(stage, msg)
+            except Exception:
+                pass
 
     # 最多重试 3 次（429 退避）
     MAX_RETRIES = 3
@@ -2404,6 +2547,7 @@ def _proto_login(email: str, password: str,
             s.headers.update(_JB_LOGIN_HEADERS)
 
             # Step 1: GET /login → CSRF cookie
+            _emit("logging_in", "获取登录会话...")
             r1 = s.get(f"{_JB_BASE}/login")
             if r1.status_code != 200:
                 return {"ok": False, "cookies": {}, "message": f"GET /login 失败: {r1.status_code}"}
@@ -2425,27 +2569,108 @@ def _proto_login(email: str, password: str,
                 return {"ok": False, "cookies": {}, "message": f"POST sessions 失败: {r2.status_code}"}
             sid = r2.json().get("id", "")
 
+            # 在触发 OTP 发送之前准备邮箱快照（Outlook/YYDS/NiMail）
+            otp_ctx = login_otp.prepare_otp_context(email, outlook_cred=outlook_cred)
+
             # Step 3: POST /api/auth/sessions/{id}/email/login
             r3 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/email/login",
                          json={"email": email})
             if r3.status_code != 200:
                 return {"ok": False, "cookies": {}, "message": f"email/login 失败: {r3.status_code} {r3.text[:200]}"}
-            state = r3.json().get("state", "")
-            if state != "PASSWORD_REQUIRED":
+            j3 = r3.json()
+            state = j3.get("state", "")
+
+            if state == "PASSWORD_REQUIRED":
+                # Step 4: POST /api/auth/sessions/{id}/password
+                _emit("logging_in", "验证密码...")
+                r4 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/password",
+                             json={"password": password})
+                if r4.status_code == 429:
+                    wait_s = 5 * (attempt + 1)
+                    logger.warning(f"[ProtoLogin] {email} password 429，{wait_s}s 后重试")
+                    time.sleep(wait_s)
+                    continue
+                if r4.status_code != 200:
+                    return {"ok": False, "cookies": {}, "message": f"password 失败: {r4.status_code} {r4.text[:200]}"}
+                j4 = r4.json()
+            elif state == "EMAIL_OTP_REQUIRED":
+                j4 = j3
+            elif j3.get("authenticated"):
+                j4 = j3
+            else:
                 return {"ok": False, "cookies": {}, "message": f"意外状态: {state}（邮箱/账号不存在？）"}
 
-            # Step 4: POST /api/auth/sessions/{id}/password
-            r4 = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/password",
-                         json={"password": password})
-            if r4.status_code != 200:
-                return {"ok": False, "cookies": {}, "message": f"password 失败: {r4.status_code} {r4.text[:200]}"}
-            j4 = r4.json()
+            otp_method = ""
+            # Step 5 (若需要): 处理 EMAIL_OTP_REQUIRED
             if not j4.get("authenticated"):
-                return {"ok": False, "cookies": {}, "message": f"认证失败: {j4.get('state', 'unknown')}（密码错误？）"}
+                cur_state = j4.get("state", "unknown")
+                if cur_state != "EMAIL_OTP_REQUIRED":
+                    return {"ok": False, "cookies": {}, "message": f"认证失败: {cur_state}（密码错误？）"}
+
+                if resend_holder is not None:
+                    def _resend_otp():
+                        csrf_now = s.cookies.get("_st-JBA", "") or csrf
+                        s.headers["X-XSRF-TOKEN"] = csrf_now
+                        rr = s.post(f"{_JB_BASE}/api/auth/sessions/{sid}/otp/email/resend", json={})
+                        return rr.status_code == 200
+                    resend_holder["fn"] = _resend_otp
+
+                prov_label = {
+                    "outlook": "Outlook 自动接码中...",
+                    "yyds": "YYDS 自动接码中...",
+                    "nimail": "NiMail 自动接码中...",
+                    "manual": "等待手动输入邮箱验证码...",
+                }.get(otp_ctx.provider, "等待邮箱验证码...")
+                _emit("otp", prov_label)
+                logger.info(f"[ProtoLogin] {email} 触发 EMAIL_OTP_REQUIRED ({prov_label})")
+
+                code, otp_method = login_otp.fetch_login_otp(
+                    otp_ctx,
+                    timeout=otp_timeout,
+                    interval=3.0,
+                    manual_otp_fn=manual_otp_fn,
+                )
+
+                # 提交验证码（手动输入错误时允许最多再试 2 次）
+                max_verify_tries = 3 if otp_method == "manual" and manual_otp_fn else 1
+                verified = False
+                last_err = ""
+                for v_try in range(max_verify_tries):
+                    csrf_now = s.cookies.get("_st-JBA", "")
+                    if csrf_now:
+                        s.headers["X-XSRF-TOKEN"] = csrf_now
+                    r5 = s.post(
+                        f"{_JB_BASE}/api/auth/sessions/{sid}/otp/email",
+                        json={"oneTimePassword": str(code).strip()},
+                    )
+                    if r5.status_code == 200:
+                        j5 = r5.json()
+                        if j5.get("authenticated"):
+                            verified = True
+                            break
+                        last_err = f"OTP 状态异常: {j5.get('state', 'unknown')}"
+                    else:
+                        last_err = f"OTP 验证失败 ({r5.status_code}): {r5.text[:160]}"
+
+                    if v_try < max_verify_tries - 1 and manual_otp_fn:
+                        _emit("otp", "验证码错误，请重新输入...")
+                        code = manual_otp_fn(email, f"上次验证码无效 ({last_err})")
+                        if not code:
+                            break
+                    else:
+                        break
+
+                if not verified:
+                    return {"ok": False, "cookies": {}, "message": last_err or "邮箱验证码校验失败"}
 
             # 收集 cookies
             cookies = dict(s.cookies)
-            return {"ok": True, "cookies": cookies, "message": "协议登录成功"}
+            return {
+                "ok": True,
+                "cookies": cookies,
+                "message": "协议登录成功" + (f" ({otp_method})" if otp_method else ""),
+                "otp_method": otp_method,
+            }
 
         except Exception as e:
             return {"ok": False, "cookies": {}, "message": str(e)}
@@ -2460,22 +2685,52 @@ def _proto_login(email: str, password: str,
 
 def _proto_login_single(port: int, browser_type: str, email: str, password: str,
                          country: str = "", auto_tokens: bool = False,
-                         worker_url: str = "", ladder_proxy: str = "") -> dict:
+                         worker_url: str = "", ladder_proxy: str = "",
+                         outlook_cred: dict | None = None,
+                         otp_timeout: float = 120.0,
+                         status_cb=None,
+                         manual_otp_fn=None,
+                         resend_holder: dict | None = None) -> dict:
     """
-    协议登录单个账号 → 打开浏览器 → CDP 注入 Cookie → 导航到已登录页面。
-
-    比纯浏览器登录快 5-10 倍（无需等页面渲染、填表单、点按钮）。
+    协议登录单个账号 → 打开浏览器 → CDP 注入 Cookie → 导航到已登录页面（或直接跳转绑卡弹窗）。
 
     Returns:
-        {"port": int, "email": str, "ok": bool, "message": str}
+        {"port": int, "email": str, "country": str, "ok": bool, "stage": str, "message": str}
     """
-    result = {"port": port, "email": email, "ok": False, "message": ""}
+    result = {
+        "port": port,
+        "email": email,
+        "country": (country or "").upper(),
+        "ok": False,
+        "stage": "init",
+        "message": "",
+    }
+
+    def _emit(stage: str, msg: str):
+        result["stage"] = stage
+        result["message"] = msg
+        if status_cb:
+            try:
+                status_cb(stage, msg)
+            except Exception:
+                pass
 
     # Phase 1: 协议登录（纯 HTTP，走 CF Worker 代理避免 sessions 429）
     logger.info(f"[ProtoLogin:{port}] 协议登录 {email}...")
-    login_result = _proto_login(email, password, worker_url=worker_url, ladder_proxy=ladder_proxy)
+    login_result = _proto_login(
+        email,
+        password,
+        worker_url=worker_url,
+        ladder_proxy=ladder_proxy,
+        outlook_cred=outlook_cred,
+        otp_timeout=otp_timeout,
+        status_cb=_emit,
+        manual_otp_fn=manual_otp_fn,
+        resend_holder=resend_holder,
+    )
     if not login_result["ok"]:
-        result["message"] = login_result["message"]
+        _emit("failed", login_result["message"])
+        release_debug_port(port)
         logger.error(f"[ProtoLogin:{port}] 协议登录失败: {login_result['message']}")
         return result
 
@@ -2483,6 +2738,7 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
     logger.info(f"[ProtoLogin:{port}] 协议登录成功, cookies: {list(cookies.keys())}")
 
     # Phase 2: 打开浏览器 + 注入 Cookie
+    _emit("opening_browser", "打开浏览器并注入登录态...")
     browser = None
     try:
         co = ChromiumOptions()
@@ -2514,41 +2770,50 @@ def _proto_login_single(port: int, browser_type: str, email: str, password: str,
                 "httpOnly": name != "_st-JBA",
             })
 
-        # Phase 3: 导航到已登录页面
-        target_url = f"{_JB_BASE}/licenses"
-        tab.get(target_url)
-        tab.wait.doc_loaded(timeout=15)
-        time.sleep(2)
-
-        cur = (tab.url or "").lower()
-        if "login" not in cur and "signup" not in cur:
-            result["ok"] = True
-            result["message"] = "协议登录成功"
-            logger.info(f"[ProtoLogin:{port}] 浏览器已登录! URL: {cur}")
+        # Phase 3 & 4: 若开启 auto_tokens 且指定国家，直接跳 TOKENS_URL 省一次中间跳转
+        if auto_tokens and country:
+            cc = country.upper()
+            _emit("setting_country", f"跳转绑卡页并设置地区 ({cc})...")
+            logger.info(f"[ProtoLogin:{port}] 直接跳转绑卡页 (国家={cc})...")
+            tok_res = _setup_tokens_page_ex(tab, country_code=cc, skip_initial_wait=True)
+            if tok_res.get("ok"):
+                result["ok"] = True
+                _emit(tok_res.get("stage", "card_ready"), tok_res.get("message", f"已进入绑卡弹窗 ({cc})"))
+            else:
+                cur = (tab.url or "").lower()
+                if "login" in cur or "signup" in cur:
+                    _emit("failed", "Cookie 注入后仍被重定向到登录页")
+                else:
+                    # 浏览器已登录，只是跳转/点开弹窗某一步未完成，保留浏览器供手动处理
+                    result["ok"] = True
+                    _emit(tok_res.get("stage", "logged_in"), tok_res.get("message", "已登录但未打开绑卡弹窗"))
         else:
-            result["message"] = "Cookie 注入后仍被重定向到登录页"
-            logger.warning(f"[ProtoLogin:{port}] Cookie 注入失败, URL: {cur}")
+            target_url = f"{_JB_BASE}/licenses"
+            tab.get(target_url)
+            tab.wait.doc_loaded(timeout=15)
+            time.sleep(1.5)
 
-        # Phase 4: 可选 — 跳转绑卡页
-        if result["ok"] and auto_tokens and country:
-            logger.info(f"[ProtoLogin:{port}] 自动跳转绑卡页 (国家={country})...")
-            try:
-                _setup_tokens_page(tab, country_code=country)
-                result["message"] = "协议登录成功 + 已跳转绑卡页"
-            except Exception as e:
-                logger.warning(f"[ProtoLogin:{port}] 跳转绑卡页失败: {e}")
-                result["message"] = "协议登录成功，但跳转绑卡页失败"
+            cur = (tab.url or "").lower()
+            if "login" not in cur and "signup" not in cur:
+                result["ok"] = True
+                _emit("logged_in", login_result.get("message", "协议登录成功"))
+                logger.info(f"[ProtoLogin:{port}] 浏览器已登录! URL: {cur}")
+            else:
+                _emit("failed", "Cookie 注入后仍被重定向到登录页")
+                logger.warning(f"[ProtoLogin:{port}] Cookie 注入失败, URL: {cur}")
 
     except Exception as e:
-        result["message"] = f"浏览器阶段失败: {e}"
+        _emit("failed", f"浏览器阶段失败: {e}")
         logger.error(f"[ProtoLogin:{port}] 浏览器异常: {e}")
     finally:
         # 登录失败时关闭浏览器，避免进程泄漏；成功时保留供用户使用
-        if not result["ok"] and browser:
-            try:
-                browser.quit()
-            except Exception:
-                pass
+        if not result["ok"]:
+            release_debug_port(port)
+            if browser:
+                try:
+                    browser.quit()
+                except Exception:
+                    pass
 
     return result
 
@@ -2559,18 +2824,18 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
     """
     协议批量登录：纯 HTTP 登录 + Cookie 注入浏览器。
 
-    比浏览器自动化登录快 5-10 倍。
+    支持每个 account 独立指定 country / outlook_cred。
     走 CF Worker 代理（若已配置）避免 sessions IP 429 限流。
 
     Args:
-        accounts: [{"email": "xxx", "password": "xxx"}, ...]
+        accounts: [{"email": "xxx", "password": "xxx", "country"?: "DE", "outlook_cred"?: dict}, ...]
         browser_type: "chrome" / "edge"
-        country: 国家代码
+        country: 默认国家代码
         auto_tokens: 登录后是否自动跳转绑卡页
         workers: 并发数（1-15）
 
     Returns:
-        [{"port": int, "email": str, "ok": bool, "message": str}, ...]
+        [{"port": int, "email": str, "country": str, "ok": bool, "stage": str, "message": str}, ...]
     """
     count = len(accounts)
     if count == 0:
@@ -2587,18 +2852,22 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
     else:
         logger.warning("[ProtoLogin] 未配置 CF Worker，直连 JetBrains 可能被 sessions 429 限流")
 
-    # 端口分配
-    existing = scan_debug_browsers()
-    used_ports = {b["port"] for b in existing}
-    next_port = max(used_ports, default=9699) + 1
-    ports = [next_port + i for i in range(count)]
-
-    logger.info(f"[ProtoLogin] 开始协议批量登录 {count} 个账号 (workers={workers})")
+    ports = allocate_debug_ports(count)
+    logger.info(f"[ProtoLogin] 开始协议批量登录 {count} 个账号 (workers={workers}, ports={ports})")
 
     if count == 1:
         acc = accounts[0]
-        return [_proto_login_single(ports[0], browser_type, acc["email"], acc["password"],
-                                     country, auto_tokens, worker_url, ladder_proxy)]
+        return [_proto_login_single(
+            ports[0],
+            browser_type,
+            acc["email"],
+            acc["password"],
+            acc.get("country") or country,
+            auto_tokens,
+            worker_url,
+            ladder_proxy,
+            outlook_cred=acc.get("outlook_cred"),
+        )]
 
     from concurrent.futures import ThreadPoolExecutor, as_completed
     results = []
@@ -2606,13 +2875,22 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
     with ThreadPoolExecutor(max_workers=actual_workers) as pool:
         futures = {}
         for i, acc in enumerate(accounts):
-            f = pool.submit(_proto_login_single, ports[i], browser_type,
-                           acc["email"], acc["password"], country, auto_tokens,
-                           worker_url, ladder_proxy)
+            f = pool.submit(
+                _proto_login_single,
+                ports[i],
+                browser_type,
+                acc["email"],
+                acc["password"],
+                acc.get("country") or country,
+                auto_tokens,
+                worker_url,
+                ladder_proxy,
+                outlook_cred=acc.get("outlook_cred"),
+            )
             futures[f] = ports[i]
-            # 错峰间隔：每个任务间隔 2 秒，避免 sessions 桶被集中打满
+            # 错峰间隔：每个任务间隔 1.5 秒，避免 sessions 桶被集中打满
             if i < count - 1:
-                time.sleep(2)
+                time.sleep(1.5)
 
         try:
             for f in as_completed(futures, timeout=600):
@@ -2620,11 +2898,13 @@ def proto_login_batch(accounts: list[dict], browser_type: str = "chrome",
                     results.append(f.result())
                 except Exception as e:
                     p = futures[f]
-                    results.append({"port": p, "email": "", "ok": False, "message": str(e)})
+                    release_debug_port(p)
+                    results.append({"port": p, "email": "", "ok": False, "stage": "failed", "message": str(e)})
         except TimeoutError:
             for f, p in futures.items():
                 if not f.done():
-                    results.append({"port": p, "email": "", "ok": False, "message": "登录超时"})
+                    release_debug_port(p)
+                    results.append({"port": p, "email": "", "ok": False, "stage": "failed", "message": "登录超时"})
 
     success = sum(1 for r in results if r["ok"])
     logger.info(f"[ProtoLogin] 完成: {success}/{count} 成功")
@@ -2645,27 +2925,20 @@ def fill_card_info(
     """
     在已打开的浏览器窗口中自动填写 JetBrains Add credit card 表单。
 
-    用户必须先手动导航到 Add credit card 页面（JetBrains 的付款方式页面）。
-    Adyen 支付表单的卡号/到期日/CVV 通常在 iframe 中，姓名可能在主页面。
-
-    Args:
-        browser: Chromium 浏览器实例
-        card_number: 卡号（纯数字，如 "4111111111111111"）
-        expiry_date: 有效期 MM/YY（如 "12/28"）
-        cvv: 安全码（如 "123"）
-        card_name: 持卡人姓名（如 "ZHANG SAN"）
-
-    Returns:
-        {"ok": True/False, "message": "...", "filled": {...}}
+    Adyen 支付表单的卡号/到期日/CVV 通常在 iframe 中，持卡人姓名在主页面。
     """
     filled = {}
+
+    if not (card_name or "").strip():
+        firsts = ["JAMES", "JOHN", "ROBERT", "MICHAEL", "DAVID", "ALEX", "DANIEL", "EMILY", "SOPHIA", "OLIVIA"]
+        lasts = ["SMITH", "MILLER", "BROWN", "TAYLOR", "WILSON", "CLARK", "HALL", "LEWIS", "WALKER", "YOUNG"]
+        card_name = f"{random.choice(firsts)} {random.choice(lasts)}"
 
     try:
         tab = browser.latest_tab
         logger.info(f"[FillCard] 当前页面: {tab.url}")
 
         # ── 1. 尝试在 Adyen iframe 中填写卡号/到期日/CVV ──
-        # Adyen 使用多个独立 iframe，每个字段一个 iframe
         adyen_filled = _fill_adyen_iframes(tab, card_number, expiry_date, cvv)
         filled.update(adyen_filled)
 
@@ -2678,7 +2951,12 @@ def fill_card_info(
         name_filled = _fill_card_name(tab, card_name)
         filled.update(name_filled)
 
-        # 汇总结果
+        # 触发主页面失焦，促使 Adyen/表单校验立刻更新 Confirm 按钮状态
+        try:
+            tab.run_js("if (document.activeElement && document.activeElement.blur) document.activeElement.blur();")
+        except Exception:
+            pass
+
         success_count = sum(1 for v in filled.values() if v)
         total_fields = 4  # card_number, expiry, cvv, name
         if success_count >= 3:
@@ -2703,7 +2981,23 @@ def _fill_adyen_iframes(tab, card_number: str, expiry_date: str, cvv: str) -> di
     """
     result = {"card_number": False, "expiry": False, "cvv": False}
 
-    # 按精确 title 定位（最可靠），顺序：卡号 → 到期日 → CVV
+    def _fill_one(frame, inp, val: str):
+        try:
+            existing = (inp.attr("value") or "").strip()
+            if existing:
+                _clear_input_in_frame(frame, inp)
+        except Exception:
+            pass
+        _type_into_input(inp, val, frame=frame)
+        # 触发 Tab/blur 让 Adyen 立刻校验当前字段
+        try:
+            frame.run_cdp("Input.dispatchKeyEvent", type="keyDown",
+                          key="Tab", code="Tab", windowsVirtualKeyCode=9)
+            frame.run_cdp("Input.dispatchKeyEvent", type="keyUp",
+                          key="Tab", code="Tab", windowsVirtualKeyCode=9)
+        except Exception:
+            pass
+
     iframe_map = [
         ("@title=Iframe for card number", card_number, "card_number", "卡号"),
         ("@title=Iframe for expiry date", expiry_date, "expiry", "到期日"),
@@ -2724,10 +3018,10 @@ def _fill_adyen_iframes(tab, card_number: str, expiry_date: str, cvv: str) -> di
                 logger.warning(f"[FillCard] {label} iframe 内未找到可见 input")
                 continue
 
-            _type_into_input(inp, value, frame=frame)
+            _fill_one(frame, inp, value)
             result[key] = True
             logger.info(f"[FillCard] 已填写{label} (Adyen iframe)")
-            time.sleep(0.3)  # 等 Adyen JS 处理完再填下一个
+            time.sleep(0.25)
 
         except Exception as e:
             logger.warning(f"[FillCard] 填写{label}异常: {e}")
@@ -2744,16 +3038,16 @@ def _fill_adyen_iframes(tab, card_number: str, expiry_date: str, cvv: str) -> di
 
             fields = [(card_number, "card_number"), (expiry_date, "expiry"), (cvv, "cvv")]
             for i, (value, key) in enumerate(fields):
-                if i < len(adyen_iframes) and not result[key]:
+                if i < len(adyen_iframes) and not result[key] and value:
                     try:
                         frame = tab.get_frame(adyen_iframes[i])
                         if frame:
                             inp = _find_input_in_frame(frame)
                             if inp:
-                                _type_into_input(inp, value, frame=frame)
+                                _fill_one(frame, inp, value)
                                 result[key] = True
                                 logger.info(f"[FillCard] 已填写 {key} (顺序)")
-                                time.sleep(0.3)
+                                time.sleep(0.25)
                     except Exception as e:
                         logger.debug(f"[FillCard] 顺序填写 {key} 异常: {e}")
         except Exception:
@@ -2769,19 +3063,19 @@ def _fill_adyen_iframes(tab, card_number: str, expiry_date: str, cvv: str) -> di
 def _clear_input_in_frame(frame, inp):
     """用 CDP Ctrl+A → Backspace 清空 Adyen iframe 内的输入框"""
     inp.click()
-    time.sleep(0.2)
+    time.sleep(0.15)
     # Ctrl+A 全选（必须带 windowsVirtualKeyCode 才能生效）
     frame.run_cdp('Input.dispatchKeyEvent', type='keyDown',
                   key='a', code='KeyA', windowsVirtualKeyCode=65, modifiers=2)
     frame.run_cdp('Input.dispatchKeyEvent', type='keyUp',
                   key='a', code='KeyA', windowsVirtualKeyCode=65, modifiers=2)
-    time.sleep(0.1)
+    time.sleep(0.08)
     # Backspace 删除
     frame.run_cdp('Input.dispatchKeyEvent', type='keyDown',
                   key='Backspace', code='Backspace', windowsVirtualKeyCode=8)
     frame.run_cdp('Input.dispatchKeyEvent', type='keyUp',
                   key='Backspace', code='Backspace', windowsVirtualKeyCode=8)
-    time.sleep(0.3)
+    time.sleep(0.2)
 
 
 def clear_card_info(browser) -> dict:
@@ -2830,51 +3124,191 @@ def clear_card_info(browser) -> dict:
 #  一键确认：点击蓝色 Confirm 按钮
 # ═══════════════════════════════════════════════════════════
 
-def confirm_card(browser) -> dict:
-    """点击 Add credit card 页面的蓝色 Confirm 按钮"""
+def confirm_card(browser, wait_ready_timeout: float = 6.0) -> dict:
+    """
+    可靠点击 Add credit card 弹窗的 Confirm 按钮：
+    1. 仅匹配可见 <button>Confirm</button>（优先 modal / add-credit-card 内）
+    2. 失焦并等待 disabled / aria-disabled 解除
+    3. 滚动到视野中心后点击（DrissionPage 点击 + CDP 坐标点击兜底）
+    4. 校验点击效果：进入 3DS / 提交中 / 弹窗关闭 / 表单报错
+    """
     try:
         tab = browser.latest_tab
         current_url = tab.url or ""
         logger.info(f"[ConfirmCard] 当前页面: {current_url}")
 
-        btn = None
-        # 优先：精确匹配 class 含 add-credit-card 的按钮
+        if "login" in current_url.lower():
+            return {"ok": False, "stage": "login_expired", "message": "页面处于登录页，无法确认"}
+
+        # 先尝试触发当前焦点失焦，帮助 Adyen/React 解锁 Confirm
         try:
-            btns = tab.eles("tag:button", timeout=3)
-            for b in btns:
-                cls = b.attr("class") or ""
-                txt = (b.text or "").strip()
-                if "add-credit-card" in cls and txt == "Confirm":
-                    btn = b
-                    break
+            tab.run_js("if (document.activeElement && document.activeElement.blur) document.activeElement.blur();")
         except Exception:
             pass
 
-        # 回退1：text=Confirm
-        if not btn:
+        def _inspect_confirm() -> dict:
             try:
-                btn = tab.ele("text:Confirm", timeout=2)
+                res = tab.run_js("""
+                    const isVis = (el) => {
+                        if (!el) return false;
+                        const st = getComputedStyle(el);
+                        if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return false;
+                        const r = el.getBoundingClientRect();
+                        return r.width > 0 && r.height > 0;
+                    };
+                    // 清理旧标记
+                    document.querySelectorAll('[data-ghostreg-confirm]').forEach(e => e.removeAttribute('data-ghostreg-confirm'));
+
+                    // 优先在可见弹窗里找按钮
+                    const containers = Array.from(document.querySelectorAll('.modal, [role="dialog"], .add-credit-card')).filter(isVis);
+                    const roots = containers.length ? [...containers, document] : [document];
+
+                    let target = null;
+                    for (const root of roots) {
+                        const btns = Array.from(root.querySelectorAll('button, [role="button"]'));
+                        // 1) add-credit-card + Confirm
+                        target = btns.find(b => isVis(b) && (b.className || '').toString().includes('add-credit-card') && /^confirm$/i.test((b.textContent || '').trim()));
+                        if (target) break;
+                        // 2) 精确文本 Confirm
+                        target = btns.find(b => isVis(b) && /^confirm$/i.test((b.textContent || '').trim()));
+                        if (target) break;
+                        // 3) modal footer submit / primary button（排除 Close/Cancel）
+                        if (root !== document) {
+                            target = btns.find(b => isVis(b) && (b.type === 'submit' || (b.className || '').toString().includes('primary')) && !/close|cancel|back/i.test((b.textContent || '').trim()));
+                            if (target) break;
+                        }
+                    }
+
+                    const iframes = Array.from(document.querySelectorAll('iframe'));
+                    const visibleIframes = iframes.filter(isVis).length;
+                    const has3ds = iframes.some(f => {
+                        const src = (f.src || '').toLowerCase();
+                        const title = (f.title || '').toLowerCase();
+                        return isVis(f) && (src.includes('threeds') || src.includes('3ds') || title.includes('challenge') || title.includes('3d'));
+                    });
+                    const bodyTxt = (document.body.innerText || '');
+                    const errEl = document.querySelector('.alert-danger, .error-message, [class*="error" i]:not(iframe)');
+                    const errTxt = (errEl && isVis(errEl)) ? (errEl.textContent || '').trim().slice(0, 120) : '';
+
+                    if (!target) {
+                        return {
+                            found: false,
+                            iframeCount: visibleIframes,
+                            has3ds: has3ds,
+                            errorText: errTxt,
+                            has3dsText: /3d\\s*secure|verification\\s*code|authenticate/i.test(bodyTxt),
+                        };
+                    }
+
+                    target.setAttribute('data-ghostreg-confirm', '1');
+                    const disabled = !!target.disabled || target.getAttribute('aria-disabled') === 'true' || target.classList.contains('disabled');
+                    const r = target.getBoundingClientRect();
+                    return {
+                        found: true,
+                        disabled: disabled,
+                        text: (target.textContent || '').trim(),
+                        x: r.left + r.width / 2,
+                        y: r.top + r.height / 2,
+                        iframeCount: visibleIframes,
+                        has3ds: has3ds,
+                        errorText: errTxt,
+                        has3dsText: /3d\\s*secure|verification\\s*code|authenticate/i.test(bodyTxt),
+                    };
+                """)
+                return res if isinstance(res, dict) else {}
+            except Exception:
+                return {}
+
+        # 1. 等待 Confirm 按钮出现并变成可点击状态
+        info = {}
+        deadline = time.time() + wait_ready_timeout
+        while time.time() < deadline:
+            info = _inspect_confirm()
+            if info.get("found") and not info.get("disabled"):
+                break
+            time.sleep(0.3)
+
+        if not info.get("found"):
+            if info.get("has3ds") or info.get("has3dsText"):
+                return {"ok": True, "stage": "3ds", "message": "页面已在 3DS 验证界面"}
+            return {"ok": False, "stage": "not_found", "message": "未找到可见的 Confirm 按钮"}
+
+        if info.get("disabled"):
+            err_hint = f" ({info['errorText']})" if info.get("errorText") else ""
+            return {"ok": False, "stage": "disabled", "message": f"Confirm 按钮处于禁用状态，请检查卡信息是否完整有效{err_hint}"}
+
+        pre_iframes = info.get("iframeCount", 0)
+
+        # 2. 滚动到视野中央并执行点击（DrissionPage 点击优先）
+        try:
+            tab.run_js("""
+                const el = document.querySelector('[data-ghostreg-confirm="1"]');
+                if (el) el.scrollIntoView({block: 'center', inline: 'center'});
+            """)
+            time.sleep(0.15)
+        except Exception:
+            pass
+
+        clicked_dp = False
+        try:
+            btn = tab.ele("@data-ghostreg-confirm=1", timeout=2)
+            if btn:
+                btn.click()
+                clicked_dp = True
+                logger.info("[ConfirmCard] DrissionPage 已点击 Confirm 按钮")
+        except Exception as e:
+            logger.debug(f"[ConfirmCard] DrissionPage 点击异常: {e}")
+
+        if not clicked_dp:
+            try:
+                info_pos = _inspect_confirm()
+                cx, cy = float(info_pos.get("x", 0)), float(info_pos.get("y", 0))
+                if cx > 0 and cy > 0:
+                    tab.run_cdp("Input.dispatchMouseEvent", type="mousePressed", x=cx, y=cy, button="left", clickCount=1)
+                    tab.run_cdp("Input.dispatchMouseEvent", type="mouseReleased", x=cx, y=cy, button="left", clickCount=1)
+                    logger.info("[ConfirmCard] CDP 坐标已点击 Confirm 按钮")
             except Exception:
                 pass
 
-        # 回退2：submit 按钮
-        if not btn:
-            try:
-                btn = tab.ele("@type=submit", timeout=2)
-            except Exception:
-                pass
+        # 3. 校验点击后的页面变化（最多 3.5 秒；若 1.4 秒完全无反应则用 CDP+JS 补点一次）
+        retried_click = False
+        verify_deadline = time.time() + 3.5
+        start_wait = time.time()
+        while time.time() < verify_deadline:
+            time.sleep(0.35)
+            after = _inspect_confirm()
 
-        if not btn:
-            return {"ok": False, "message": "未找到 Confirm 按钮"}
+            if after.get("has3ds") or after.get("has3dsText") or (after.get("iframeCount", 0) > pre_iframes and pre_iframes > 0):
+                return {"ok": True, "stage": "3ds", "message": "已点击 Confirm，已触发 3DS 验证"}
 
-        btn.click()
-        logger.info("[ConfirmCard] 已点击 Confirm 按钮")
-        time.sleep(0.5)
-        return {"ok": True, "message": "已点击 Confirm"}
+            if not after.get("found"):
+                if after.get("errorText"):
+                    return {"ok": False, "stage": "error", "message": f"提交报错: {after['errorText']}"}
+                return {"ok": True, "stage": "submitted", "message": "已确认提交（弹窗已关闭/跳转）"}
+
+            if after.get("errorText"):
+                return {"ok": False, "stage": "error", "message": f"表单报错: {after['errorText']}"}
+
+            if after.get("disabled"):
+                return {"ok": True, "stage": "submitting", "message": "已点击 Confirm，提交处理中..."}
+
+            if not retried_click and (time.time() - start_wait) >= 1.4:
+                retried_click = True
+                logger.info("[ConfirmCard] 初次点击未见状态变化，尝试 CDP+JS 补点一次")
+                try:
+                    cx, cy = float(after.get("x", 0)), float(after.get("y", 0))
+                    if cx > 0 and cy > 0:
+                        tab.run_cdp("Input.dispatchMouseEvent", type="mousePressed", x=cx, y=cy, button="left", clickCount=1)
+                        tab.run_cdp("Input.dispatchMouseEvent", type="mouseReleased", x=cx, y=cy, button="left", clickCount=1)
+                    tab.run_js("const el = document.querySelector('[data-ghostreg-confirm=\"1\"]'); if (el) el.click();")
+                except Exception:
+                    pass
+
+        return {"ok": False, "stage": "no_response", "message": "已尝试点击 Confirm，但页面未响应（请检查卡信息或是否被弹窗遮挡）"}
 
     except Exception as e:
         logger.warning(f"[ConfirmCard] 异常: {e}")
-        return {"ok": False, "message": f"点击失败: {str(e)}"}
+        return {"ok": False, "stage": "error", "message": f"点击失败: {str(e)}"}
 
 
 def _fill_card_direct(tab, card_number: str, expiry_date: str, cvv: str) -> dict:
@@ -2930,10 +3364,36 @@ def _fill_card_direct(tab, card_number: str, expiry_date: str, cvv: str) -> dict
 
 
 def _fill_card_name(tab, card_name: str) -> dict:
-    """填写持卡人姓名（通常在主页面而非 iframe 中）"""
+    """填写持卡人姓名（先清空再写入，并触发 React/原生 input+change+blur 事件）"""
     result = {"card_name": False}
 
-    # DrissionPage 用 @ 语法做属性查找，不支持 CSS [name*=xxx]
+    def _fill_name_ele(inp) -> bool:
+        try:
+            inp.click()
+            time.sleep(0.1)
+            try:
+                inp.clear()
+            except Exception:
+                pass
+            _type_into_input(inp, card_name)
+            # 兜底触发 React/原生输入事件并校验非空
+            import json as _json
+            safe_val = _json.dumps(card_name)
+            inp.run_js(f"""
+                const val = {safe_val};
+                if (!this.value || this.value.trim() !== val.trim()) {{
+                    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                    if (setter) setter.call(this, val);
+                    else this.value = val;
+                }}
+                this.dispatchEvent(new Event('input', {{bubbles: true}}));
+                this.dispatchEvent(new Event('change', {{bubbles: true}}));
+                this.dispatchEvent(new Event('blur', {{bubbles: true}}));
+            """)
+            return True
+        except Exception:
+            return False
+
     for sel in ["@name=holderName", "@name=cardHolder",
                 "@name=name_on_card", "@name=card-name",
                 "@placeholder=Name on card",
@@ -2941,23 +3401,20 @@ def _fill_card_name(tab, card_name: str) -> dict:
                 "@aria-label=Name on card"]:
         try:
             inp = tab.ele(sel, timeout=0.5)
-            if inp:
-                _type_into_input(inp, card_name)
+            if inp and _fill_name_ele(inp):
                 result["card_name"] = True
                 logger.info(f"[FillCard] 已填写持卡人姓名 (直接: {sel})")
                 return result
         except Exception:
             pass
 
-    # 如果上面都没找到，尝试找 label 文字关联的 input
     try:
         label = tab.ele("text:Name on card", timeout=2)
         if label:
             parent = label.parent()
             if parent:
                 inp = parent.ele("tag:input", timeout=2)
-                if inp:
-                    _type_into_input(inp, card_name)
+                if inp and _fill_name_ele(inp):
                     result["card_name"] = True
                     logger.info("[FillCard] 已填写持卡人姓名 (label 关联)")
     except Exception:
@@ -2968,8 +3425,6 @@ def _fill_card_name(tab, card_name: str) -> dict:
 
 def _find_input_in_frame(frame) -> object:
     """在 Adyen iframe 内查找真正的可见输入框（跳过隐藏的辅助 input）"""
-    # Adyen iframe 内有多个 input，只有一个是真正可见的（其余 aria-hidden=true）
-    # CSS 属性选择器在 DrissionPage 的 iframe 内可能不工作，直接遍历
     try:
         inputs = frame.eles("tag:input", timeout=2)
         for inp in inputs:
@@ -2983,22 +3438,18 @@ def _find_input_in_frame(frame) -> object:
 def _type_into_input(inp, value: str, frame=None):
     """
     Adyen 支付表单输入：点击激活 → CDP Input.insertText 一次性写入。
-    这是最可靠的方式，Adyen 的 JS 能正确处理 insertText 事件。
-    frame: 如果 input 在 iframe 内，传入 frame 对象用于发送 CDP 命令。
     """
     try:
         inp.click()
-        time.sleep(0.3)
+        time.sleep(0.2)
     except Exception:
         pass
 
     cdp_target = frame if frame else inp
     try:
-        # Input.insertText 一次性写入，Adyen 会自动格式化（如卡号加空格）
         cdp_target.run_cdp('Input.insertText', text=value)
-        time.sleep(0.5)
+        time.sleep(0.35)
     except Exception:
-        # 回退到逐字符 keyDown/keyUp
         for ch in value:
             try:
                 cdp_target.run_cdp('Input.dispatchKeyEvent', type='keyDown', text=ch)
@@ -3009,4 +3460,4 @@ def _type_into_input(inp, value: str, frame=None):
                     inp.input(ch)
                 except Exception:
                     pass
-        time.sleep(0.3)
+        time.sleep(0.25)
